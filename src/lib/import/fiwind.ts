@@ -132,7 +132,9 @@ export const FIWIND_CATEGORY_SLUG: Record<
   investment: "crypto-inversiones",
   yield: "rendimientos",
   crypto_out: "conversiones",
-  transfer: "transferencia-interna",
+  // Wallet TRANSFERENCIA ARS/USDC/USDT/USD. “A/De una cuenta tuya” shares this
+  // kind but is Transferencia interna via isInternalTransferDescription.
+  transfer: "conversiones",
   numeric: "conversiones",
 };
 
