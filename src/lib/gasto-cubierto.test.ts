@@ -1,4 +1,3 @@
-process.env.NEXT_PUBLIC_REINTEGRO_PAYEES = "ANA+LOPEZ,ANITA";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -10,8 +9,12 @@ import {
 } from "./gasto-cubierto";
 import {
   isConsumosHiddenPayment,
+  isHogarReintegroDescription,
   isReintegroHogarTipo,
+  parseReintegroPayees,
 } from "./reintegro-hogar";
+
+const GROUPS = parseReintegroPayees("ANA+LOPEZ,ANITA");
 
 describe("isHogarUtilitySlug / category", () => {
   it("matches system utility slugs", () => {
@@ -62,15 +65,14 @@ describe("isGastoCubiertoTipo + Consumos visibility", () => {
   });
 
   it("does not steal Reintegro hogar Tipo", () => {
-    assert.equal(
-      isReintegroHogarTipo(true, "Ana Lopez Gomez Diaz"),
-      true,
-    );
+    const hogar = isHogarReintegroDescription("Ana Lopez Gomez Diaz", GROUPS);
+    assert.equal(isReintegroHogarTipo(true, hogar), true);
     assert.equal(
       isConsumosHiddenPayment(
         true,
         "Ana Lopez Gomez Diaz",
         "envios",
+        hogar,
       ),
       false,
     );

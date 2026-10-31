@@ -1,4 +1,3 @@
-process.env.NEXT_PUBLIC_REINTEGRO_PAYEES = "ANA+LOPEZ,ANITA";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -8,43 +7,47 @@ import {
   isHogarReintegroDescription,
   isConsumosHiddenPayment,
   isReintegroHogarTipo,
+  parseReintegroPayees,
   sameHogarReintegroKey,
 } from "./reintegro-hogar";
+
+const GROUPS = parseReintegroPayees("ANA+LOPEZ,ANITA");
 
 describe("looksLikeHogarReintegroPayee", () => {
   it("matches Retiro/Pago a Ana Lopez…", () => {
     assert.equal(
       looksLikeHogarReintegroPayee(
         "Retiro a Ana Lopez Gomez Diaz",
+        GROUPS,
       ),
       true,
     );
     assert.equal(
-      looksLikeHogarReintegroPayee("PAGO A ANA LOPEZ"),
+      looksLikeHogarReintegroPayee("PAGO A ANA LOPEZ", GROUPS),
       true,
     );
     assert.equal(
-      looksLikeHogarReintegroPayee("Transferencia a Anita"),
+      looksLikeHogarReintegroPayee("Transferencia a Anita", GROUPS),
       true,
     );
   });
 
   it("ignores unrelated people and non-outbound lines", () => {
     assert.equal(
-      looksLikeHogarReintegroPayee("Retiro a Elena Paco Coro"),
+      looksLikeHogarReintegroPayee("Retiro a Elena Paco Coro", GROUPS),
       false,
     );
     assert.equal(
-      looksLikeHogarReintegroPayee("PAGO A DIA"),
+      looksLikeHogarReintegroPayee("PAGO A DIA", GROUPS),
       false,
     );
     assert.equal(
-      looksLikeHogarReintegroPayee("Ana Lopez en el super"),
+      looksLikeHogarReintegroPayee("Ana Lopez en el super", GROUPS),
       false,
     );
     // First name alone is too weak (false positives).
     assert.equal(
-      looksLikeHogarReintegroPayee("Retiro a Ana"),
+      looksLikeHogarReintegroPayee("Retiro a Ana", GROUPS),
       false,
     );
   });
@@ -73,6 +76,7 @@ describe("countHogarReintegroMatches", () => {
       countHogarReintegroMatches(
         rows,
         "Retiro a Ana Lopez Gomez Diaz",
+        GROUPS,
       ),
       2,
     );
@@ -80,6 +84,7 @@ describe("countHogarReintegroMatches", () => {
       countHogarReintegroMatches(
         rows,
         "Retiro a Ana Lopez Gomez Diaz",
+        GROUPS,
         { onlyUnset: true },
       ),
       1,
@@ -99,23 +104,24 @@ describe("looksLikeBareHogarReintegroPayee / isHogarReintegroDescription", () =>
     assert.equal(
       looksLikeBareHogarReintegroPayee(
         "Ana Lopez Gomez Diaz",
+        GROUPS,
       ),
       true,
     );
     assert.equal(
-      isHogarReintegroDescription("Ana Lopez Gomez Diaz"),
+      isHogarReintegroDescription("Ana Lopez Gomez Diaz", GROUPS),
       true,
     );
-    assert.equal(looksLikeBareHogarReintegroPayee("Anita"), true);
+    assert.equal(looksLikeBareHogarReintegroPayee("Anita", GROUPS), true);
   });
 
   it("does not treat merchant lines as bare reintegro", () => {
     assert.equal(
-      looksLikeBareHogarReintegroPayee("Ana Lopez en el super"),
+      looksLikeBareHogarReintegroPayee("Ana Lopez en el super", GROUPS),
       false,
     );
     assert.equal(
-      isHogarReintegroDescription("Ana Lopez en el super"),
+      isHogarReintegroDescription("Ana Lopez en el super", GROUPS),
       false,
     );
   });
@@ -123,12 +129,13 @@ describe("looksLikeBareHogarReintegroPayee / isHogarReintegroDescription", () =>
 
 describe("Consumos visibility for hogar reintegro isPayment", () => {
   it("keeps Ana visible; hides unrelated payments", () => {
+    const hogar = isHogarReintegroDescription("Ana Lopez Gomez Diaz", GROUPS);
     assert.equal(
-      isConsumosHiddenPayment(true, "Ana Lopez Gomez Diaz"),
+      isConsumosHiddenPayment(true, "Ana Lopez Gomez Diaz", undefined, hogar),
       false,
     );
     assert.equal(
-      isReintegroHogarTipo(true, "Ana Lopez Gomez Diaz"),
+      isReintegroHogarTipo(true, hogar),
       true,
     );
     assert.equal(isConsumosHiddenPayment(true, "SU PAGO EN PESOS"), true);

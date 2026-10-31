@@ -32,7 +32,6 @@ import {
   type GastoCubiertoPrompt,
 } from "@/components/gasto-cubierto-toast";
 import {
-  looksLikeHogarReintegroPayee,
   isConsumosHiddenPayment,
   isReintegroHogarTipo,
 } from "@/lib/reintegro-hogar";
@@ -356,6 +355,7 @@ export function MesAMesView({
                     Boolean(t.isPayment),
                     t.descriptionNormalized,
                     t.category?.slug,
+                    Boolean(t.reintegroHogar),
                   ) &&
                   (t.amountArs != null || t.amountUsd != null),
               )
@@ -363,6 +363,8 @@ export function MesAMesView({
                 ...t,
                 ownership:
                   t.ownership === "shared" ? ("shared" as const) : ("personal" as const),
+                reintegroHogar: Boolean(t.reintegroHogar),
+                reintegroPayee: Boolean(t.reintegroPayee),
               })),
           );
           if (data.categories?.length) setCategories(data.categories);
@@ -436,15 +438,22 @@ export function MesAMesView({
     if (res2.ok) {
       const d2 = await res2.json();
       setTxs(
-        (d2.transactions as Tx[]).filter(
-          (t) =>
-            !isConsumosHiddenPayment(
-              Boolean(t.isPayment),
-              t.descriptionNormalized,
-              t.category?.slug,
-            ) &&
-            (t.amountArs != null || t.amountUsd != null),
-        ),
+        (d2.transactions as Tx[])
+          .filter(
+            (t) =>
+              !isConsumosHiddenPayment(
+                Boolean(t.isPayment),
+                t.descriptionNormalized,
+                t.category?.slug,
+                Boolean(t.reintegroHogar),
+              ) &&
+              (t.amountArs != null || t.amountUsd != null),
+          )
+          .map((t) => ({
+            ...t,
+            reintegroHogar: Boolean(t.reintegroHogar),
+            reintegroPayee: Boolean(t.reintegroPayee),
+          })),
       );
     }
   }
@@ -638,14 +647,12 @@ export function MesAMesView({
 
       const reintegroCount =
         typeof data?.reintegroCount === "number" ? data.reintegroCount : 0;
-      const rowDesc =
-        txs.find((r) => r.id === id)?.descriptionNormalized ??
-        prev.find((r) => r.id === id)?.descriptionNormalized ??
-        "";
+      const row =
+        txs.find((r) => r.id === id) ?? prev.find((r) => r.id === id);
       if (
         !body.skipReintegroOffer &&
         reintegroCount >= 1 &&
-        looksLikeHogarReintegroPayee(rowDesc) &&
+        Boolean(row?.reintegroPayee) &&
         body.ownership === "shared"
       ) {
         setToast(null);
@@ -709,7 +716,7 @@ export function MesAMesView({
   async function onAssignChange(r: Tx, value: string) {
     if (value === "personal") {
       const wasSpecial =
-        isReintegroHogarTipo(Boolean(r.isPayment), r.descriptionNormalized) ||
+        isReintegroHogarTipo(Boolean(r.isPayment), Boolean(r.reintegroHogar)) ||
         isTransferenciaInternaTipo(Boolean(r.isPayment), r.category, r.descriptionNormalized) ||
         isGastoCubiertoTipo(Boolean(r.isPayment), r.category);
       if (r.ownership === "personal" && !wasSpecial) return;
@@ -778,10 +785,7 @@ export function MesAMesView({
       return;
     }
     if (value === "shared" || value === (activeHouseholdId ?? "")) {
-      if (
-        looksLikeHogarReintegroPayee(r.descriptionNormalized) &&
-        !r.isPayment
-      ) {
+      if (r.reintegroPayee && !r.isPayment) {
         const n = txs.filter(
           (x) =>
             !x.isPayment &&
@@ -798,7 +802,7 @@ export function MesAMesView({
         return;
       }
       const wasSpecial =
-        isReintegroHogarTipo(Boolean(r.isPayment), r.descriptionNormalized) ||
+        isReintegroHogarTipo(Boolean(r.isPayment), Boolean(r.reintegroHogar)) ||
         isTransferenciaInternaTipo(Boolean(r.isPayment), r.category, r.descriptionNormalized) ||
         isGastoCubiertoTipo(Boolean(r.isPayment), r.category);
       if (r.ownership !== "shared" || wasSpecial) {

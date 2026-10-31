@@ -16,6 +16,11 @@ import {
 import { getDb, schema } from "@/lib/db";
 import { mapInChunks } from "@/lib/db/chunk";
 import { normalizeBank } from "@/lib/banks";
+import {
+  isHogarReintegroDescription,
+  looksLikeHogarReintegroPayee,
+} from "@/lib/reintegro-hogar";
+import { reintegroPayeeGroups } from "@/lib/reintegro-hogar-server";
 
 export async function GET(req: Request) {
   const authResult = await requireApiUser();
@@ -131,6 +136,7 @@ export async function GET(req: Request) {
       }
     }
 
+    const payeeGroups = reintegroPayeeGroups();
     const data = rows.map((r) => {
       const receipt = receiptByTx.get(r.id) ?? null;
       return {
@@ -154,6 +160,14 @@ export async function GET(req: Request) {
         receipt,
         canEdit:
           r.ownership === "shared" || r.paidByUserId === sessionUser.id,
+        reintegroHogar: isHogarReintegroDescription(
+          r.descriptionNormalized,
+          payeeGroups,
+        ),
+        reintegroPayee: looksLikeHogarReintegroPayee(
+          r.descriptionNormalized,
+          payeeGroups,
+        ),
       };
     });
 
@@ -585,14 +599,16 @@ export async function PATCH(req: Request) {
 
     // Reintegro hogar (servicios): isPayment, optional bulk to same payee.
     if (wantsHouseholdReimbursement && before.descriptionNormalized) {
-      const { looksLikeHogarReintegroPayee } = await import(
-        "@/lib/reintegro-hogar"
-      );
       const {
         countHogarReintegroByMerchant,
         applyHogarReintegroToSimilar,
       } = await import("@/lib/reintegro-hogar-db");
-      if (looksLikeHogarReintegroPayee(before.descriptionNormalized)) {
+      if (
+        looksLikeHogarReintegroPayee(
+          before.descriptionNormalized,
+          reintegroPayeeGroups(),
+        )
+      ) {
         reintegroCount = await countHogarReintegroByMerchant({
           householdId: ctx.household.id,
           description: before.descriptionNormalized,
@@ -617,13 +633,15 @@ export async function PATCH(req: Request) {
         body.offerReintegro === true)
     ) {
       // Offer count so Consumos can show the reintegro toast after an edit.
-      const { looksLikeHogarReintegroPayee } = await import(
-        "@/lib/reintegro-hogar"
-      );
       const { countHogarReintegroByMerchant } = await import(
         "@/lib/reintegro-hogar-db"
       );
-      if (looksLikeHogarReintegroPayee(before.descriptionNormalized)) {
+      if (
+        looksLikeHogarReintegroPayee(
+          before.descriptionNormalized,
+          reintegroPayeeGroups(),
+        )
+      ) {
         reintegroCount = await countHogarReintegroByMerchant({
           householdId: ctx.household.id,
           description: before.descriptionNormalized,

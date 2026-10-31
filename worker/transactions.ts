@@ -14,6 +14,7 @@ import {
   syncStatusFromOutbox,
   type OutboxDraft,
 } from "./serpix-sync";
+import { reintegroFlags } from "./reintegro-flags";
 import { consumosVisibleSql } from "./sql";
 
 const MAX_LIMIT = 100;
@@ -149,6 +150,7 @@ async function listTransactions(req: Request, env: Env, user: SessionUser): Prom
       canEdit: row.ownership === "shared" || row.paid_by_user_id === user.id,
       isBusiness: Boolean(row.is_business),
       syncStatus: syncStatusFromOutbox(row),
+      ...reintegroFlags(row.description_normalized, env.REINTEGRO_PAYEES),
     };
   });
 

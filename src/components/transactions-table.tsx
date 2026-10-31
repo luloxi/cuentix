@@ -21,10 +21,7 @@ import {
   GastoCubiertoToast,
   type GastoCubiertoPrompt,
 } from "@/components/gasto-cubierto-toast";
-import {
-  looksLikeHogarReintegroPayee,
-  isReintegroHogarTipo,
-} from "@/lib/reintegro-hogar";
+import { isReintegroHogarTipo } from "@/lib/reintegro-hogar";
 import { isGastoCubiertoTipo } from "@/lib/gasto-cubierto";
 import { isTransferenciaInternaTipo } from "@/lib/bbva/bank-entries";
 import { BusinessSyncToggle, type SyncStatus } from "@/components/business-sync-toggle";
@@ -43,6 +40,10 @@ type Tx = {
   id: string; date: string; descriptionNormalized: string;
   amountArs: number | null; amountUsd: number | null; installment: string | null;
   isPayment: boolean; ownership: "personal" | "shared";
+  /** Server flag: outbound-prefix payee OR bare payee. Missing on old responses. */
+  reintegroHogar?: boolean;
+  /** Server flag: outbound-prefix payee only. Missing on old responses. */
+  reintegroPayee?: boolean;
   paidByUserId: string | null; source: string;
   linkedTransactionId?: string | null;
   linkedToInvoiceIog?: boolean;
@@ -136,7 +137,7 @@ function toSheet(rows: Tx[], members: Member[]) {
     "Monto $": r.amountArs ?? "",
     USD: r.amountUsd ?? "",
     Categoría: categoryLabel(r.category?.name),
-    Tipo: isReintegroHogarTipo(r.isPayment, r.descriptionNormalized)
+    Tipo: isReintegroHogarTipo(r.isPayment, Boolean(r.reintegroHogar))
       ? "Reintegro hogar"
       : isTransferenciaInternaTipo(r.isPayment, r.category, r.descriptionNormalized)
         ? "Transferencia interna"
@@ -288,6 +289,8 @@ export function TransactionsTable() {
       const list = (data.transactions ?? []).map((t) => ({
         ...t,
         ownership: t.ownership === "shared" ? "shared" as const : "personal" as const,
+        reintegroHogar: Boolean(t.reintegroHogar),
+        reintegroPayee: Boolean(t.reintegroPayee),
       }));
       setRows(list);
       setTotalCount(data.total ?? list.length);
@@ -470,16 +473,14 @@ export function TransactionsTable() {
         typeof data?.similarCount === "number" ? data.similarCount : 0;
       const reintegroCount =
         typeof data?.reintegroCount === "number" ? data.reintegroCount : 0;
-      const rowDesc =
-        rows.find((r) => r.id === id)?.descriptionNormalized ??
-        prev.find((r) => r.id === id)?.descriptionNormalized ??
-        "";
+      const row =
+        rows.find((r) => r.id === id) ?? prev.find((r) => r.id === id);
 
       // Option C: editing a roommate service reimbursement → ask before double-loading.
       if (
         !body.skipReintegroOffer &&
         reintegroCount >= 1 &&
-        looksLikeHogarReintegroPayee(rowDesc) &&
+        Boolean(row?.reintegroPayee) &&
         (categoryChanged || body.ownership === "shared")
       ) {
         setApplyPrompt(null);
@@ -602,7 +603,7 @@ export function TransactionsTable() {
   }
 
   function assignValueFor(r: Tx): string {
-    if (isReintegroHogarTipo(r.isPayment, r.descriptionNormalized)) return "reintegro";
+    if (isReintegroHogarTipo(r.isPayment, Boolean(r.reintegroHogar))) return "reintegro";
     if (isTransferenciaInternaTipo(r.isPayment, r.category, r.descriptionNormalized)) return "internal";
     if (isGastoCubiertoTipo(r.isPayment, r.category)) return "cubierto";
     if (r.ownership === "personal") return "personal";
@@ -612,7 +613,7 @@ export function TransactionsTable() {
   async function onAssignChange(r: Tx, value: string) {
     if (value === "personal") {
       const wasSpecial =
-        isReintegroHogarTipo(r.isPayment, r.descriptionNormalized) ||
+        isReintegroHogarTipo(r.isPayment, Boolean(r.reintegroHogar)) ||
         isTransferenciaInternaTipo(r.isPayment, r.category, r.descriptionNormalized) ||
         isGastoCubiertoTipo(r.isPayment, r.category);
       if (r.ownership === "personal" && !wasSpecial) return;
@@ -704,10 +705,7 @@ export function TransactionsTable() {
     // value is a household id (or legacy "shared")
     if (value === "shared" || value === (activeHouseholdId ?? "")) {
       // Roommate service reimbursements must not become a second Hogar bill.
-      if (
-        looksLikeHogarReintegroPayee(r.descriptionNormalized) &&
-        !r.isPayment
-      ) {
+      if (r.reintegroPayee && !r.isPayment) {
         const n = rows.filter(
           (x) =>
             !x.isPayment &&
@@ -724,7 +722,7 @@ export function TransactionsTable() {
         return;
       }
       const wasSpecial =
-        isReintegroHogarTipo(r.isPayment, r.descriptionNormalized) ||
+        isReintegroHogarTipo(r.isPayment, Boolean(r.reintegroHogar)) ||
         isTransferenciaInternaTipo(r.isPayment, r.category, r.descriptionNormalized) ||
         isGastoCubiertoTipo(r.isPayment, r.category);
       if (r.ownership !== "shared" || wasSpecial) {
