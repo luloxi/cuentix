@@ -43,25 +43,18 @@ describe("isBankAccountingEntry internal transfers", () => {
     }
   });
 
-  it("Rainman: Transferencia inmediata (800k / 1.9M) is internal, not Ingresos", () => {
+  it("leaves a bare TRANSFERENCIA or TRANSFERENCIA INMEDIATA for the worker", () => {
     for (const d of [
       "Transferencia inmediata",
       "BBVA CA$ Transferencia inmediata",
       "BBVA CA$ TRANSFERENCIA INMEDIATA",
-    ]) {
-      assert.equal(isInternalTransferDescription(d), true, d);
-      assert.equal(isNonIncomeTransferLabel(d), true, d);
-    }
-  });
-
-  it("Rainman: bare BBVA TRANSFERENCIA (306k / 200k) is internal", () => {
-    for (const d of [
       "BBVA CA$ TRANSFERENCIA",
       "BBVA CA$ TRANSFERENCIA 306333.80",
       "TRANSFERENCIA",
     ]) {
-      assert.equal(isInternalTransferDescription(d), true, d);
-      assert.equal(isNonIncomeTransferLabel(d), true, d);
+      assert.equal(isOwnAccountTransferDescription(d), false, d);
+      assert.equal(isInternalTransferDescription(d), false, d);
+      assert.equal(isNonIncomeTransferLabel(d), false, d);
     }
   });
 

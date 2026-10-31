@@ -10,22 +10,6 @@ function foldDesc(s: string): string {
     .trim();
 }
 
-/**
- * Strip bank / account-channel prefixes so we can match bare memos like
- * "BBVA CA$ TRANSFERENCIA" → "TRANSFERENCIA".
- */
-function coreTransferMemo(u: string): string {
-  return u
-    .replace(
-      /^(BBVA|GALICIA|SANTANDER|MACRO|BRUBANK|BBNK|FIWIND|MERCADOPAGO|MP)\b/,
-      "",
-    )
-    // CA$ / CA — "$" is non-word so \b after it fails; allow either form.
-    .replace(/\bCA\$?(?=\s|$)/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /** Argentine CUIT/CUIL: 11 digits, optional dashes. */
 function extractCuits(u: string): string[] {
   const out: string[] = [];
@@ -57,14 +41,16 @@ export function isOwnFxConversionDescription(description: string): boolean {
 /**
  * Own-account / internal wallet moves — not gasto nor ingreso.
  * Covers Fiwind “A/De una cuenta tuya”, BBVA entre-cuentas / cuenta propia,
- * Transferencia inmediata (self), bare TRANSFERENCIA, TRANSF. CLIENTE CTA. CAP,
- * BBVA CR TRF / CR TBE / INM COE credit tickets, same-CUIT self transfers,
- * BBNK self, and own FX (Cambio de moneda).
+ * TRANSF. CLIENTE CTA. CAP, BBVA CR TRF / CR TBE / INM COE credit tickets,
+ * same-CUIT self transfers, BBNK self, and own FX (Cambio de moneda).
+ *
+ * A bare "TRANSFERENCIA" or "TRANSFERENCIA INMEDIATA" with no own-account
+ * marker is not internal. New imports keep `is_payment = 0` and the worker
+ * classifies them. Explicit own-account phrases stay internal.
  *
  * Income-side classification only. Expense totals use `BANK_ACCOUNTING_SQL`,
  * which counts "Transferencia inmediata" and a bare "TRANSFERENCIA" as spends
- * unless a stricter own-account phrase matches. This function still treats
- * both as internal so they stay out of Ingresos.
+ * unless a stricter own-account phrase matches.
  *
  * Rainman: money already yours changing pockets ≠ income.
  * Optional `holderCuit` (11 digits): CUIT in the memo matching the titular → interno.
@@ -94,9 +80,8 @@ export function isOwnAccountTransferDescription(
   // Own FX
   if (isOwnFxConversionDescription(u)) return true;
 
-  // Mercado Pago / BBVA instant self: "Transferencia inmediata"
-  // (01/09 +800k, 1.924M, 1.9M) — never Ingresos Variables.
-  if (u.includes("TRANSFERENCIA INMEDIATA")) return true;
+  // A bare "TRANSFERENCIA" or "TRANSFERENCIA INMEDIATA" is not an own-account
+  // marker. The worker classifies those new rows (`is_payment = 0`).
 
   // BBVA CA incoming credit (not a card purchase, not income).
   if (/\bTRANSF\.?\s+CREDITO\b/.test(u)) return true;
@@ -140,16 +125,6 @@ export function isOwnAccountTransferDescription(
   if (
     /\b(TRANSFERENCIA|TRANSF)\b/.test(u) &&
     /\b(MISMO TITULAR|MISMO CLIENTE|PROPIA|SELF)\b/.test(u)
-  ) {
-    return true;
-  }
-
-  // Bare "TRANSFERENCIA" (± amount / nro) after stripping BBVA CA$ — Rainman
-  // 29/05 +306333.80 and 07/05 +200k. Counterparty names stay out.
-  const core = coreTransferMemo(u);
-  if (
-    /^TRANSFERENCIA(\s+\d[\d.,]*)?$/.test(core) ||
-    /^TRANSFERENCIA(\s+NRO\.?:?\s*\d+)?$/.test(core)
   ) {
     return true;
   }
@@ -221,9 +196,9 @@ export function isTransferenciaInternaTipo(
  * Amount-only tipos are always accounting here. Expense SQL counts a Fiwind
  * numeric row unless `pairFiwindEchoes` drops that id (own currency,
  * closest-first, 1:1, households of the requesting user). The Fiwind row
- * itself is only ever dropped. "Transferencia inmediata" and bare
- * "TRANSFERENCIA" stay accounting here via the income-side detector and count
- * as spends in SQL.
+ * itself is only ever dropped. Exact wallet codes such as "TRANSFERENCIA"
+ * and "TRANSFERENCIA INMEDIATA" stay accounting via the Fiwind detector.
+ * A longer line that only contains that phrase is not an own-account move.
  */
 export function isBankAccountingEntry(description: string): boolean {
   if (isOwnAccountTransferDescription(description)) return true;

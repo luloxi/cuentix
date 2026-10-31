@@ -26,10 +26,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
  * Numeric-only descriptions are a documented SQL difference: legacy
  * `isBankAccountingEntry` treats every amount-only tipo as accounting, while
  * SQL counts them unless `pairFiwindEchoes` drops that id.
- * "Transferencia inmediata" and a bare "TRANSFERENCIA" are the other
- * difference: SQL counts them as spends. JS still treats both as internal
- * on the income side. A longer BBVA line that only contains that phrase
- * counts as a spend and stays on Consumos.
+ * Exact "Transferencia inmediata" and a bare "TRANSFERENCIA" still match the
+ * Fiwind wallet detector, so JS drops them while SQL counts them. A longer
+ * BBVA line that only contains that phrase is not an own-account move: both
+ * sides count it, and it stays on Consumos.
  */
 const ROWS: Array<{
   id: string;
@@ -88,8 +88,7 @@ const ROWS: Array<{
     amountArs: "60000",
     isPayment: 0,
     isCredit: 0,
-    expense: false,
-    sqlExpense: true,
+    expense: true,
   },
 ];
 
@@ -599,6 +598,8 @@ describe("consumosVisibleSql matches the legacy list filter", () => {
     const rows: Array<{
       description: string;
       visible: boolean;
+      /** Legacy list filter, when it no longer matches SQL visibility. */
+      legacyVisible?: boolean;
       numeric?: boolean;
       isPayment?: number;
       isCredit?: number;
@@ -617,8 +618,8 @@ describe("consumosVisibleSql matches the legacy list filter", () => {
       { description: "Retiro", visible: false },
       { description: "Compra KO", visible: false },
       { description: "TRANSFERENCIA ARS", visible: false },
-      { description: "Transferencia inmediata", visible: true },
-      { description: "TRANSFERENCIA", visible: true },
+      { description: "Transferencia inmediata", visible: true, legacyVisible: false },
+      { description: "TRANSFERENCIA", visible: true, legacyVisible: false },
       { description: "COMPRA SUPER ARS", visible: true },
       { description: "TRANSFERENCIA A JUAN", visible: true },
       { description: "MERPAGO*TEMBICI", visible: true },
@@ -693,7 +694,9 @@ describe("consumosVisibleSql matches the legacy list filter", () => {
           !isInternalTransferDescription(row.description)
         ) &&
         !isPeriodDebtSource(row.source ?? "bbva_import");
-      if (row.numeric) {
+      if (row.legacyVisible != null) {
+        assert.equal(legacy, row.legacyVisible, `${row.description} legacy`);
+      } else if (row.numeric) {
         assert.equal(legacy, false, `${row.description} legacy still hides amount-only`);
         assert.equal(row.visible, true, `${row.description} sql keeps unpaired numeric visible`);
       } else {

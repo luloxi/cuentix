@@ -419,6 +419,28 @@ describe("Fiwind Actividad fixtures", () => {
   });
 });
 
+describe("bare transfer is_payment", () => {
+  it("stores a generic transfer as not a payment and keeps explicit own-account phrases", () => {
+    const buf = workbookBuffer([
+      ["Fecha", "Establecimiento", "Cuota", "Importe en $", "Importe en U$S"],
+      ["10/08/2026", "TRANSFERENCIA", "/", 100, null],
+      ["10/08/2026", "TRANSFERENCIA INMEDIATA", "/", 200, null],
+      ["10/08/2026", "A una cuenta tuya", "/", 300, null],
+      ["10/08/2026", "CR TRF INM COE", "/", 400, null],
+      ["10/08/2026", "TRANSF A CUENTA PROPIA", "/", 500, null],
+      ["10/08/2026", "ENTRE CUENTAS", "/", 600, null],
+    ]);
+    const parsed = parseStatementWorkbook(buf, "bbva-ca.xlsx");
+    const byDesc = (re: RegExp) => parsed.movements.find((row) => re.test(row.descriptionNormalized));
+    assert.equal(byDesc(/^TRANSFERENCIA$/i)?.isPayment, false);
+    assert.equal(byDesc(/INMEDIATA/i)?.isPayment, false);
+    assert.equal(byDesc(/CUENTA TUYA/i)?.isPayment, true);
+    assert.equal(byDesc(/CR TRF/i)?.isPayment, true);
+    assert.equal(byDesc(/CUENTA PROPIA/i)?.isPayment, true);
+    assert.equal(byDesc(/ENTRE CUENTAS/i)?.isPayment, true);
+  });
+});
+
 describe("amount formats", () => {
   it("uses the last separator so AR and US both work", () => {
     assert.equal(parseBbvaAmount("15.420,50")?.value, 15420.5);

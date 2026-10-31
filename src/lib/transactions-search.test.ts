@@ -96,7 +96,7 @@ describe("transactionMatchesQuery BBVA token → Transferencia interna", () => {
     assert.equal(
       transactionMatchesQuery(
         {
-          descriptionNormalized: "Transferencia inmediata",
+          descriptionNormalized: "A una cuenta tuya",
           amountArs: 300000,
           amountUsd: null,
           categorySlug: null,
@@ -104,6 +104,18 @@ describe("transactionMatchesQuery BBVA token → Transferencia interna", () => {
         "CR TBE",
       ),
       true,
+    );
+    assert.equal(
+      transactionMatchesQuery(
+        {
+          descriptionNormalized: "Transferencia inmediata",
+          amountArs: 300000,
+          amountUsd: null,
+          categorySlug: null,
+        },
+        "CR TBE",
+      ),
+      false,
     );
   });
 
