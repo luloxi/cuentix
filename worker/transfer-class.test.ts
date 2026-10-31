@@ -5,6 +5,7 @@ import {
   deriveOwnAccountIds,
   extractAccountIds,
   parseOwnAccountIds,
+  transferDirection,
   type TransferClassRow,
 } from "./transfer-class";
 
@@ -86,7 +87,7 @@ describe("classifyTransferRows", () => {
           id: "inn",
           date: "2026-08-11",
           bank: "GALICIA",
-          description: "ACREDITACION",
+          description: "TRANSFERENCIA",
           amountArs: "100",
           isCredit: 1,
         }),
@@ -106,7 +107,7 @@ describe("classifyTransferRows", () => {
           id: "inn",
           householdId: "h2",
           bank: "BBVA",
-          description: "ACREDITACION",
+          description: "TRANSFERENCIA",
           amountArs: "100",
           isCredit: 1,
         }),
@@ -125,7 +126,7 @@ describe("classifyTransferRows", () => {
           id: "foreign",
           householdId: "h-foreign",
           bank: "GALICIA",
-          description: "ACREDITACION",
+          description: "TRANSFERENCIA",
           amountArs: "100",
           isCredit: 1,
         }),
@@ -145,7 +146,7 @@ describe("classifyTransferRows", () => {
           id: "late",
           date: "2026-08-12",
           bank: "GALICIA",
-          description: "ACREDITACION",
+          description: "TRANSFERENCIA",
           amountArs: "100",
           isCredit: 1,
         }),
@@ -199,7 +200,7 @@ describe("classifyTransferRows", () => {
           id: "inn",
           date: "2026-08-02",
           bank: "MACRO",
-          description: "ACREDITACION",
+          description: "TRANSFERENCIA",
           amountArs: "100",
           isCredit: 1,
         }),
@@ -219,7 +220,7 @@ describe("classifyTransferRows", () => {
           id: "inn",
           date: "2026-08-02",
           bank: "MACRO",
-          description: "ACREDITACION",
+          description: "TRANSFERENCIA",
           amountArs: "100",
           isCredit: 1,
         }),
@@ -254,6 +255,96 @@ describe("classifyTransferRows", () => {
     assert.equal(result.revisarIds.has("bare"), true);
     assert.equal(result.internalIds.has("bare"), false);
     assert.equal(result.thirdPartyIds.has("bare"), false);
+  });
+
+  it("counts a negative is_credit transfer as incoming by absolute value", () => {
+    assert.equal(
+      transferDirection(
+        row({ id: "neg", description: "TRANSFERENCIA", amountArs: "-100", isCredit: 1, bank: "GALICIA" }),
+      ),
+      "incoming",
+    );
+    const result = classify(
+      [
+        row({ id: "out", bank: "BBVA", description: "TRANSFERENCIA", amountArs: "100" }),
+        row({
+          id: "inn",
+          bank: "GALICIA",
+          description: "TRANSFERENCIA",
+          amountArs: "-100",
+          isCredit: 1,
+        }),
+      ],
+      new Set(),
+      homes,
+    );
+    assert.equal(result.internalIds.has("out"), true);
+    assert.equal(result.revisarIds.has("out"), false);
+
+    const ownCredit = classify(
+      [
+        row({ id: "out", bank: "BBVA", description: "TRANSFERENCIA", amountArs: "40" }),
+        row({
+          id: "own",
+          bank: "GALICIA",
+          description: "ACREDITACION CUENTA PROPIA",
+          amountArs: "-40",
+          isCredit: 1,
+        }),
+      ],
+      new Set(),
+      homes,
+    );
+    assert.equal(ownCredit.internalIds.has("out"), true);
+  });
+
+  it("does not let an unrelated credit cancel a transfer", () => {
+    const result = classify(
+      [
+        row({ id: "out", bank: "BBVA", description: "TRANSFERENCIA", amountArs: "100" }),
+        row({
+          id: "dev",
+          bank: "GALICIA",
+          description: "DEVOLUCION COMPRA",
+          amountArs: "100",
+          isCredit: 1,
+        }),
+        row({
+          id: "acred",
+          bank: "MACRO",
+          description: "ACREDITACION",
+          amountArs: "-100",
+          isCredit: 1,
+        }),
+      ],
+      new Set(),
+      homes,
+    );
+    assert.equal(result.internalIds.has("out"), false);
+    assert.equal(result.revisarIds.has("out"), true);
+  });
+
+  it("lets one incoming credit cancel only one transfer", () => {
+    const result = classify(
+      [
+        row({ id: "a", date: "2026-08-10", bank: "BBVA", description: "TRANSFERENCIA", amountArs: "100" }),
+        row({ id: "b", date: "2026-08-10", bank: "GALICIA", description: "TRANSFERENCIA", amountArs: "100" }),
+        row({
+          id: "inn",
+          date: "2026-08-10",
+          bank: "MACRO",
+          description: "TRANSFERENCIA",
+          amountArs: "-100",
+          isCredit: 1,
+        }),
+      ],
+      new Set(),
+      homes,
+    );
+    assert.equal(result.internalIds.size, 1);
+    assert.equal(result.internalIds.has("a"), true);
+    assert.equal(result.internalIds.has("b"), false);
+    assert.equal(result.revisarIds.has("b"), true);
   });
 
   it("flags the 60k-style row as revisar when no twin is present", () => {

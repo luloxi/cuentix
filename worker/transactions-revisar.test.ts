@@ -166,8 +166,8 @@ describe("GET /api/transactions revisar", () => {
     insertTx(db, {
       id: "inn",
       date: "2026-08-10",
-      description: "ACREDITACION",
-      amountArs: "100",
+      description: "TRANSFERENCIA",
+      amountArs: "-100",
       bank: "GALICIA",
       isCredit: 1,
     });
