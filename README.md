@@ -8,7 +8,7 @@
 
 **Cuentix** es una PWA para llevar tus ingresos y gastos, deuda, ahorros y balance con otras personas. Importás los movimientos de tu banco o billetera (Excel/CSV de BBVA y Fiwind), los categoriza y te muestra el mes a mes, la deuda de la tarjeta y cómo evolucionan tus ahorros. También podés formar grupos (hogares) para compartir gastos y subir fotos de tickets que se leen con IA.
 
-> Estado: proyecto personal en producción en <https://cuentix.lulox.com.ar>. Funciona por invitación (lista de emails permitidos).
+> Estado: proyecto personal en producción en <https://cuentix.lulox.com.ar>. Funciona por invitación (lista de emails permitidos). Código abierto bajo AGPL.
 
 ### Stack
 
