@@ -32,10 +32,12 @@
  * household the user does not belong to are ignored.
  *
  * `classifyTransferRows` and `deriveOwnAccountIds` take plain arrays. They
- * do not touch D1. The loader is one extra indexed statement on top of the
+ * do not touch D1. The loader is two extra indexed statements on top of the
  * Fiwind echo lookup: `household_members.user_id`, then
- * `tx_household_date_idx (household_id, date)`. A failure returns no
- * internal ids, so those rows still count.
+ * `tx_household_date_idx (household_id, date)`. D1 rejects a compound SELECT
+ * with more than five terms, so income twins are a second statement. A
+ * transfer-statement failure returns no internal ids, so those rows still
+ * count. An income-twin failure keeps the transfer ids.
  */
 
 import { loadFiwindEchoIds, type FiwindEchoDb } from "./fiwind-dups";
@@ -602,9 +604,18 @@ export function pairIncomeInternalIds(
 }
 
 /**
- * One statement, three binds of `user_id` (membership, then the user's
- * incomes twice). Transaction reads are `household_id` equality plus a
- * ±1 day range on `tx_household_date_idx`. There is no date-only predicate.
+ * D1 allows at most five terms in a compound SELECT. These are two
+ * statements so the loader stays under that limit. node:sqlite allows 500,
+ * which is why the term count is checked in tests.
+ *
+ * `TRANSFER_CANDIDATE_SQL` binds `user_id` once (membership) and returns
+ * `hh`, `tx`, `marker`, and two `near` arms. Transaction reads are
+ * `household_id` equality plus a ±1 day range on `tx_household_date_idx`.
+ * There is no date-only predicate.
+ *
+ * `INCOME_TWIN_SQL` has its own `user_households` CTE. It binds `user_id`
+ * three times (membership, then the user's incomes twice) and returns the
+ * two `inc` arms: outgoing transactions that can cancel an income row.
  *
  * `hh` is one row per household. `tx` is an expense-eligible transfer-shaped
  * row. `marker` is a row that can contribute an own-account id. `near` is a
@@ -738,18 +749,30 @@ INNER JOIN transactions m
      AND abs(abs(CAST(IFNULL(m.amount_usd, '0') AS REAL)) - abs(CAST(IFNULL(n.amount_usd, '0') AS REAL))) < 0.005
    )
  )
-UNION ALL
+`;
+
+/**
+ * Outgoing transactions that can cancel an income row. Separate from
+ * `TRANSFER_CANDIDATE_SQL` so neither statement exceeds five compound terms.
+ * The same-household arm requires a non-empty bank. The other arm is a
+ * different household of the same user. Both read `tx_household_date_idx`.
+ * Column names match the transfer statement so the loader can merge rows.
+ */
+export const INCOME_TWIN_SQL = `
+WITH user_households AS (
+  SELECT household_id FROM household_members WHERE user_id = ?
+)
 SELECT
-  'inc',
-  m.id,
-  m.household_id,
-  m.date,
-  m.bank,
-  m.description_normalized,
-  m.amount_ars,
-  m.amount_usd,
-  m.is_payment,
-  m.is_credit
+  'inc' AS kind,
+  m.id AS id,
+  m.household_id AS household_id,
+  m.date AS date,
+  m.bank AS bank,
+  m.description_normalized AS description_normalized,
+  m.amount_ars AS amount_ars,
+  m.amount_usd AS amount_usd,
+  m.is_payment AS is_payment,
+  m.is_credit AS is_credit
 FROM user_households uh
 INNER JOIN incomes i ON i.household_id = uh.household_id AND i.user_id = ?
 INNER JOIN transactions m
@@ -770,16 +793,16 @@ WHERE m.is_credit = 0
   )
 UNION ALL
 SELECT
-  'inc',
-  m.id,
-  m.household_id,
-  m.date,
-  m.bank,
-  m.description_normalized,
-  m.amount_ars,
-  m.amount_usd,
-  m.is_payment,
-  m.is_credit
+  'inc' AS kind,
+  m.id AS id,
+  m.household_id AS household_id,
+  m.date AS date,
+  m.bank AS bank,
+  m.description_normalized AS description_normalized,
+  m.amount_ars AS amount_ars,
+  m.amount_usd AS amount_usd,
+  m.is_payment AS is_payment,
+  m.is_credit AS is_credit
 FROM user_households home
 INNER JOIN incomes i ON i.household_id = home.household_id AND i.user_id = ?
 INNER JOIN user_households uh ON uh.household_id <> i.household_id
@@ -859,23 +882,35 @@ function mapCandidate(row: TransferCandidateRow): TransferClassRow | null {
   };
 }
 
+/** Income twins are optional. A failure keeps the transfer half. */
+async function loadIncomeTwinRows(db: TransferClassDb, userId: string): Promise<TransferCandidateRow[]> {
+  try {
+    const res = await db.prepare(INCOME_TWIN_SQL).bind(userId, userId, userId).all<TransferCandidateRow>();
+    return res.results ?? [];
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "error";
+    console.error("income twin load failed", message.slice(0, 180));
+    return [];
+  }
+}
+
 export async function loadTransferSnapshot(
   db: TransferClassDb,
   userId: string,
   ownAccountIdsRaw: string | null | undefined,
 ): Promise<Omit<MovementExclusion, "excludedIds">> {
   try {
-    const res = await db
-      .prepare(TRANSFER_CANDIDATE_SQL)
-      .bind(userId, userId, userId)
-      .all<TransferCandidateRow>();
+    const [res, incomeRows] = await Promise.all([
+      db.prepare(TRANSFER_CANDIDATE_SQL).bind(userId).all<TransferCandidateRow>(),
+      loadIncomeTwinRows(db, userId),
+    ]);
     const homes = new Set<string>();
     const rows: TransferClassRow[] = [];
     const seen = new Set<string>();
     const markers: Array<{ description: string | null }> = [];
     const outgoing: TransferClassRow[] = [];
     const seenOut = new Set<string>();
-    for (const row of res.results ?? []) {
+    for (const row of [...(res.results ?? []), ...incomeRows]) {
       if (row.kind === "hh") {
         if (row.household_id) homes.add(String(row.household_id));
         continue;
@@ -911,9 +946,10 @@ export async function loadTransferSnapshot(
 }
 
 /**
- * Fiwind echo ids union internal-transfer ids. One Fiwind statement plus one
- * transfer statement, in parallel. Either failure leaves that half empty, so
- * the rows it could not classify still count.
+ * Fiwind echo ids union internal-transfer ids. One Fiwind statement plus the
+ * transfer statement and the income-twin statement, in parallel. A Fiwind
+ * or income-twin failure leaves that half empty, so the rows it could not
+ * classify still count. A transfer-statement failure returns no internal ids.
  */
 export async function loadExcludedMovementIds(
   db: FiwindEchoDb & TransferClassDb,
