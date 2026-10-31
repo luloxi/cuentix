@@ -73,6 +73,10 @@ export function isOwnAccountTransferDescription(
   const u = foldDesc(description);
   if (!u) return false;
 
+  // Fiwind Actividad “Depósito de cuenta propia” is a wallet credit, not a
+  // pocket move. “CUENTA PROPIA” below is for BBVA “TRANSF A CUENTA PROPIA”.
+  if (/^DEPOSITO\b/.test(u)) return false;
+
   // Fiwind / BBVA explicit own-account
   if (/\b(A|DE)\s+(UNA\s+)?CUENTA\s+TUYA\b/.test(u)) return true;
   if (u.includes("CUENTA PROPIA")) return true;
@@ -88,6 +92,10 @@ export function isOwnAccountTransferDescription(
   // Mercado Pago / BBVA instant self: "Transferencia inmediata"
   // (01/09 +800k, 1.924M, 1.9M) — never Ingresos Variables.
   if (u.includes("TRANSFERENCIA INMEDIATA")) return true;
+
+  // BBVA CA incoming credit (not a card purchase, not income).
+  if (/\bTRANSF\.?\s+CREDITO\b/.test(u)) return true;
+  if (/\bTRANSFERENCIA\s+CREDITO\b/.test(u)) return true;
 
   // BBVA CA$ credit-transfer labels — Rainman FAIL fix:
   // CR TRF / CR TBE / INM COE (e.g. "CR TBE INM COE", "CR TRF INM COE" $300k)
@@ -166,6 +174,8 @@ export function isNonIncomeTransferLabel(
   const u = foldDesc(label);
   if (!u) return false;
   if (isInternalTransferDescription(u, opts)) return true;
+  // Fiwind refunds are not income (they undo a spend).
+  if (/^DEVOLUCION\b/.test(u)) return true;
   // Card payments / DEBIN are not income (they reduce debt)
   if (isCardPaymentEntry(u)) return true;
   if (/\bDEBIN\b/.test(u)) return true;

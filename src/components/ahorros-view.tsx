@@ -6,7 +6,6 @@ import {
   Landmark,
   Plus,
   RefreshCw,
-  Trash2,
   Wallet,
 } from "lucide-react";
 import { cn, formatArs, formatUsd } from "@/lib/utils";
@@ -32,8 +31,9 @@ type Summary = {
   totalUsd: number;
   totalUsdBanks: number;
   totalUsdc: number;
-  netArs: number;
+  netArs: number | null;
   blueRate: number | null;
+  balanceNote?: string | null;
 };
 
 type AddKind = "evm" | "cardano" | "bank" | null;
@@ -169,23 +169,6 @@ export function AhorrosView() {
     }
   }
 
-  async function remove(id: string) {
-    if (!confirm("¿Eliminar este ítem?")) return;
-    try {
-      const res = await fetch(`/api/ahorros?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Error");
-      }
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-    }
-  }
-
   async function saveWalletUsd(id: string, usd: string) {
     try {
       const res = await fetch("/api/ahorros", {
@@ -244,12 +227,15 @@ export function AhorrosView() {
           <p className="text-xs text-[var(--muted-fg)]">
             Wallets y bancos · solo vos ves esto
           </p>
+          <p className="text-xs text-[var(--muted-fg)]">
+            {summary?.balanceNote || "Saldos guardados, sin sync en vivo."}
+          </p>
         </div>
         <button
           type="button"
           onClick={() => void load(true)}
           disabled={refreshing}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[11px] font-medium text-[var(--muted-fg)] transition hover:text-[var(--foreground)] disabled:opacity-60"
+          className="inline-flex min-h-10 min-w-10 cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 text-[11px] font-medium text-[var(--muted-fg)] transition hover:text-[var(--foreground)] disabled:opacity-60"
         >
           <RefreshCw
             className={cn("h-3.5 w-3.5", refreshing && "animate-spin")}
@@ -262,10 +248,15 @@ export function AhorrosView() {
         <Surface className="!p-4">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <p className="text-3xl font-semibold tabular-nums tracking-tight text-[var(--foreground)]">
-              {formatArs(Math.round(summary.netArs))}
+              {summary.netArs == null ? "Sin cotización" : formatArs(Math.round(summary.netArs))}
             </p>
             <p className="text-[11px] text-[var(--muted-fg)]">neto en pesos</p>
           </div>
+          {summary.netArs == null && (
+            <p className="mt-0.5 text-[10px] text-[var(--muted-fg)]">
+              Sin cotización blue. No valuamos los dólares en 0.
+            </p>
+          )}
           {summary.blueRate != null && summary.blueRate > 0 && (
             <p className="mt-0.5 text-[10px] text-[var(--muted-fg)]">
               Incluye USD al blue (${Math.round(summary.blueRate).toLocaleString("es-AR")})
@@ -391,7 +382,7 @@ export function AhorrosView() {
           <div className="flex gap-2">
             <button
               type="button"
-              className="lc-btn lc-btn-primary flex-1"
+              className="lc-btn lc-btn-primary min-h-10 flex-1 cursor-pointer"
               disabled={saving || !canSaveEvm}
               onClick={() => void submitAdd()}
             >
@@ -399,7 +390,7 @@ export function AhorrosView() {
             </button>
             <button
               type="button"
-              className="lc-btn lc-btn-secondary"
+              className="lc-btn lc-btn-secondary min-h-10 cursor-pointer"
               onClick={() => setAddKind(null)}
             >
               Cancelar
@@ -424,7 +415,6 @@ export function AhorrosView() {
                 key={a.id}
                 asset={a}
                 onSave={saveWalletUsd}
-                onRemove={() => void remove(a.id)}
               />
             ))}
           </ul>
@@ -444,7 +434,6 @@ export function AhorrosView() {
                 key={a.id}
                 asset={a}
                 onSave={saveBank}
-                onRemove={() => void remove(a.id)}
               />
             ))}
           </ul>
@@ -467,7 +456,7 @@ function AddChip({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted-fg)] transition hover:border-[var(--brand)]/40 hover:text-[var(--brand-fg)]"
+      className="inline-flex min-h-10 min-w-10 cursor-pointer items-center gap-1.5 rounded-full border border-dashed border-[var(--border)] px-3 text-xs font-semibold text-[var(--muted-fg)] transition hover:border-[var(--brand)]/40 hover:text-[var(--brand-fg)]"
     >
       <Plus className="h-3.5 w-3.5" />
       {icon}
@@ -488,11 +477,9 @@ function Empty({ children }: { children: React.ReactNode }) {
 function WalletRow({
   asset,
   onSave,
-  onRemove,
 }: {
   asset: Asset;
   onSave: (id: string, usd: string) => Promise<void>;
-  onRemove: () => void;
 }) {
   const [usd, setUsd] = useState(String(asset.lastBalanceUsd ?? ""));
   const [dirty, setDirty] = useState(false);
@@ -524,14 +511,6 @@ function WalletRow({
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="text-[var(--muted-fg)] hover:text-red-600"
-          aria-label="Eliminar"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
       </div>
       <div>
         <p className="mb-1 text-[10px] font-semibold uppercase text-[var(--muted-fg)]">
@@ -550,7 +529,7 @@ function WalletRow({
       {dirty && (
         <button
           type="button"
-          className="lc-btn lc-btn-primary mt-2 w-full !py-1.5 text-xs"
+          className="lc-btn lc-btn-primary mt-2 min-h-10 w-full cursor-pointer text-xs"
           onClick={() =>
             void onSave(asset.id, usd).then(() => setDirty(false))
           }
@@ -565,11 +544,9 @@ function WalletRow({
 function BankRow({
   asset,
   onSave,
-  onRemove,
 }: {
   asset: Asset;
   onSave: (id: string, ars: string, usd: string) => Promise<void>;
-  onRemove: () => void;
 }) {
   const [ars, setArs] = useState(String(asset.amountArs ?? ""));
   const [usd, setUsd] = useState(String(asset.amountUsd ?? ""));
@@ -585,14 +562,6 @@ function BankRow({
     <li className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-sm font-medium">{asset.label}</p>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="text-[var(--muted-fg)] hover:text-red-600"
-          aria-label="Eliminar"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -627,7 +596,7 @@ function BankRow({
       {dirty && (
         <button
           type="button"
-          className="lc-btn lc-btn-primary mt-2 w-full !py-1.5 text-xs"
+          className="lc-btn lc-btn-primary mt-2 min-h-10 w-full cursor-pointer text-xs"
           onClick={() =>
             void onSave(asset.id, ars, usd).then(() => setDirty(false))
           }

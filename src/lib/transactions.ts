@@ -3,6 +3,7 @@ import {
   isBankAccountingEntry,
   isInternalTransferDescription,
 } from "@/lib/bbva/bank-entries";
+import { queryMatchesBbvaInternalTransferTokens } from "@/lib/bbva/search-tokens";
 import { isPeriodDebtSource } from "@/lib/import/source";
 import { getDb, schema } from "@/lib/db";
 import { getCategoryMap } from "@/lib/household";
@@ -60,30 +61,7 @@ export function amountSearchDigitStrings(
   return [...out];
 }
 
-/**
- * Fold query the same way bank-entries folds transfer memos.
- */
-function foldSearchQuery(s: string): string {
-  return s
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * BBVA credit-transfer ticket tokens (same spirit as isOwnAccountTransferDescription).
- * When Monk searches `CR TBE` / `CR TRF` / `INM COE`, match Transferencia interna
- * rows even if descriptionNormalized was rewritten (e.g. "De una cuenta tuya").
- */
-export function queryMatchesBbvaInternalTransferTokens(q: string): boolean {
-  const u = foldSearchQuery(q);
-  if (!u) return false;
-  if (/\bCR\s+(TBE|TRF)\b/.test(u)) return true;
-  if (/\bINM\s+COE\b/.test(u)) return true;
-  return false;
-}
+export { queryMatchesBbvaInternalTransferTokens } from "@/lib/bbva/search-tokens";
 
 /**
  * Consumos `q` match: description substring OR amount digits (partial).

@@ -172,6 +172,10 @@ export const cardStatements = sqliteTable("card_statements", {
   importedBy: text("imported_by").references(() => users.id),
   importedAt: tsNow("imported_at"),
   rowCount: integer("row_count").notNull().default(0),
+  /** Null while the import can still feed active card debt. */
+  closedAt: ts("closed_at"),
+  /** open | closed. Closed rows stay as history. */
+  status: text("status").notNull().default("open"),
 });
 
 export const transactions = sqliteTable(
@@ -350,6 +354,35 @@ export const debtSettings = sqliteTable("debt_settings", {
   saldoDeudaUsd: money("saldo_deuda_usd"),
   updatedAt: tsNow("updated_at"),
 });
+
+export const patrimonioSnapshots = sqliteTable(
+  "patrimonio_snapshots",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    assetsArs: money("assets_ars").notNull().default("0"),
+    assetsUsd: money("assets_usd").notNull().default("0"),
+    debtArs: money("debt_ars").notNull().default("0"),
+    debtUsd: money("debt_usd").notNull().default("0"),
+    netWorthArs: money("net_worth_ars").notNull().default("0"),
+    fxRate: money("fx_rate"),
+    source: text("source").notNull().default("snapshot"),
+    note: text("note"),
+    createdAt: tsNow("created_at"),
+  },
+  (t) => [
+    uniqueIndex("patrimonio_snapshots_user_date_source_uidx").on(
+      t.userId,
+      t.date,
+      t.source,
+    ),
+    uniqueIndex("patrimonio_snapshots_user_date_uidx").on(t.userId, t.date),
+    index("patrimonio_snapshots_user_date_idx").on(t.userId, t.date),
+  ],
+);
 
 export const incomes = sqliteTable(
   "incomes",

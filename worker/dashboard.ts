@@ -2,7 +2,8 @@ import type { Env } from "./env";
 import { loadFx, monthEndBuy } from "./fx";
 import { activeHousehold, forceSharedOnly, type HouseholdRow } from "./household";
 import { sumIncomeArs } from "./income";
-import { ARS_EXPR, EXPENSE_SQL, USD_EXPR } from "./sql";
+import { debtFigure } from "../src/lib/stats/debt";
+import { ARS_EXPR, CLOSED_STATEMENT_SQL, EXPENSE_SQL, USD_EXPR } from "./sql";
 import { currentPeriodAr, json, num, periodRange, shiftPeriod } from "./http";
 import type { SessionUser } from "./auth";
 
@@ -67,9 +68,11 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
     .sort((a, b) => b.total - a.total)
     .slice(0, 4);
 
-  const savingsUsd = savings.usd + savings.usdc;
+  // Bank USD and wallet balances are separate lines. Net adds them once.
+  const savingsUsd = savings.usd;
   const blue = fx.blue;
-  const savingsNetArs = savings.ars + (blue != null && blue > 0 ? savingsUsd * blue : 0);
+  const savingsFxUsd = savings.usd + savings.usdc;
+  const savingsNetArs = savings.ars + (blue != null && blue > 0 ? savingsFxUsd * blue : 0);
   const incomeArs = sumIncomeArs(incomes, period, rateNow);
   const firstName = (user.name || user.email || "").split(/\s+/)[0] || "vos";
 
@@ -84,6 +87,7 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
     sharedPrevTotalArs,
     debtBalanceArs: debt.balance,
     debtSettled: debt.settled,
+    debtActiveCard: debt.activeCard,
     monthTxCount: curOwn.n,
     categorySummary: ranked,
     householdServices: SERVICES.map((svc) => ({
@@ -207,22 +211,48 @@ async function savingsTotals(env: Env, userId: string) {
 
 async function debtSnapshot(env: Env, userId: string) {
   const row = await env.DB.prepare(
-    `SELECT force_settled, saldo_deuda_ars, saldo_deuda_usd
-     FROM debt_settings WHERE user_id = ?`,
+    `SELECT
+       ds.force_settled AS force_settled,
+       ds.saldo_deuda_ars AS saldo_deuda_ars,
+       ds.saldo_deuda_usd AS saldo_deuda_usd,
+        ds.card_last4 AS card_last4,
+       (
+         SELECT COUNT(*)
+         FROM card_statements cs
+         INNER JOIN household_members hm ON hm.household_id = cs.household_id
+         WHERE hm.user_id = ds.user_id AND ${CLOSED_STATEMENT_SQL}
+       ) AS closed_statements,
+       (
+         SELECT COUNT(*)
+         FROM card_statements cs
+         INNER JOIN household_members hm ON hm.household_id = cs.household_id
+         WHERE hm.user_id = ds.user_id AND NOT (${CLOSED_STATEMENT_SQL})
+       ) AS open_statements
+     FROM debt_settings ds
+     WHERE ds.user_id = ?`,
   )
     .bind(userId)
     .first<{
       force_settled: number | null;
       saldo_deuda_ars: string | null;
       saldo_deuda_usd: string | null;
+      card_last4: string | null;
+      closed_statements: number | null;
+      open_statements: number | null;
     }>();
-  if (!row) return { balance: 0, settled: false };
-  if (row.force_settled) return { balance: 0, settled: true };
-  if (row.saldo_deuda_ars == null && row.saldo_deuda_usd == null) {
-    return { balance: 0, settled: false };
-  }
-  const balance = Math.abs(num(row.saldo_deuda_ars));
-  return { balance, settled: balance < 50 };
+  if (!row) return { balance: 0, settled: false, activeCard: false };
+  const figure = debtFigure({
+    forceSettled: Boolean(row.force_settled),
+    saldoArs: row.saldo_deuda_ars == null ? null : num(row.saldo_deuda_ars),
+    saldoUsd: row.saldo_deuda_usd == null ? null : num(row.saldo_deuda_usd),
+    closedStatements: num(row.closed_statements),
+    openStatements: num(row.open_statements),
+  });
+  return {
+    balance: figure.balanceArs,
+    settled: figure.settled,
+    activeCard: Boolean(row.card_last4) && !figure.settled,
+  };
 }
 
 async function incomeRows(env: Env, userId: string) {

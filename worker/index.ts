@@ -8,6 +8,14 @@ import {
 import { handleCategories } from "./categories";
 import { handleDashboard } from "./dashboard";
 import type { Env, WorkerContext } from "./env";
+import {
+  captureDailySnapshots,
+  handleAhorros,
+  handleDebtSettings,
+  handleDebtStats,
+  handlePatrimonio,
+  handlePatrimonioSnapshot,
+} from "./finance";
 import { json, notPorted } from "./http";
 import { handleHouseholdActive, handleMe } from "./household-routes";
 import { flushOutbox } from "./serpix-sync";
@@ -44,6 +52,15 @@ const worker = {
         return await handleCategories(req, env, user);
       }
       if (path === "/api/household/active") return await handleHouseholdActive(req, env, user);
+      if (path === "/api/ahorros") return await handleAhorros(req, env, user);
+      if (path === "/api/debt-settings") return await handleDebtSettings(req, env, user);
+      if (path === "/api/stats/deuda" && req.method === "GET") {
+        return await handleDebtStats(req, env, user);
+      }
+      if (path === "/api/patrimonio/snapshot") return await handlePatrimonioSnapshot(req, env, user);
+      if (path === "/api/patrimonio" && req.method === "GET") {
+        return await handlePatrimonio(req, env, user);
+      }
       return notPorted();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Error interno";
@@ -52,7 +69,13 @@ const worker = {
   },
 
   async scheduled(_event: unknown, env: Env, ctx: WorkerContext): Promise<void> {
-    const work = flushOutbox(env);
+    const outbox = flushOutbox(env).catch((err) => {
+      console.error("outbox flush failed", err instanceof Error ? err.message : "error");
+    });
+    const snapshots = captureDailySnapshots(env).catch((err) => {
+      console.error("patrimonio snapshot failed", err instanceof Error ? err.message : "error");
+    });
+    const work = Promise.all([outbox, snapshots]).then(() => undefined);
     ctx.waitUntil(work);
     await work;
   },

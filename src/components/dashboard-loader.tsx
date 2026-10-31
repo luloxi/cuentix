@@ -15,6 +15,7 @@ type DashboardData = {
   sharedPrevTotalArs: number;
   debtBalanceArs: number;
   debtSettled: boolean;
+  debtActiveCard?: boolean;
   monthTxCount: number;
   categorySummary: Array<{ id: string; slug: string; name: string; total: number; pct: number }>;
   householdServices: Array<{ slug: string; name: string; paid: boolean }>;
@@ -32,6 +33,7 @@ type DashboardData = {
   savingsUsdc: number;
   savingsNetArs: number;
   incomeArs: number;
+  householdName?: string;
   error?: string;
 };
 
@@ -42,30 +44,39 @@ export function DashboardLoader() {
 
   useEffect(() => {
     let cancelled = false;
-    const period = currentPeriodAr();
-    void fetch(`/api/dashboard?period=${period}`, { credentials: "include" })
-      .then(async (res) => {
-        const body = (await res.json().catch(() => null)) as DashboardData | null;
-        if (cancelled) return;
-        if (res.status === 401) {
-          window.location.replace("/login");
-          return;
-        }
-        if (res.status === 400 && body?.error === "NO_HOUSEHOLD") {
-          setMissingHome(true);
-          return;
-        }
-        if (!res.ok || !body) {
-          setError(body?.error || `Error ${res.status}`);
-          return;
-        }
-        setData(body);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Error de red");
-      });
+    function load() {
+      const period = currentPeriodAr();
+      void fetch(`/api/dashboard?period=${period}`, { credentials: "include" })
+        .then(async (res) => {
+          const body = (await res.json().catch(() => null)) as DashboardData | null;
+          if (cancelled) return;
+          if (res.status === 401) {
+            window.location.replace("/login");
+            return;
+          }
+          if (res.status === 400 && body?.error === "NO_HOUSEHOLD") {
+            setMissingHome(true);
+            return;
+          }
+          if (!res.ok || !body) {
+            setError(body?.error || `Error ${res.status}`);
+            return;
+          }
+          setMissingHome(false);
+          setError(null);
+          setData(body);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : "Error de red");
+        });
+    }
+    load();
+    window.addEventListener("lc:household-switched", load);
+    window.addEventListener("lc:expense-created", load);
     return () => {
       cancelled = true;
+      window.removeEventListener("lc:household-switched", load);
+      window.removeEventListener("lc:expense-created", load);
     };
   }, []);
 
@@ -87,6 +98,7 @@ export function DashboardLoader() {
       sharedPrevTotalArs={data.sharedPrevTotalArs}
       debtBalanceArs={data.debtBalanceArs}
       debtSettled={data.debtSettled}
+      debtActiveCard={data.debtActiveCard}
       monthTxCount={data.monthTxCount}
       categorySummary={data.categorySummary}
       householdServices={data.householdServices}
@@ -96,6 +108,7 @@ export function DashboardLoader() {
       savingsUsdc={data.savingsUsdc}
       savingsNetArs={data.savingsNetArs}
       incomeArs={data.incomeArs}
+      householdName={data.householdName}
     />
   );
 }

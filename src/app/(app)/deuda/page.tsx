@@ -1,5 +1,7 @@
-import { SoonPage } from "@/components/soon-page";
+"use client";
+
+import { DeudaView } from "@/components/deuda-view";
 
 export default function Page() {
-  return <SoonPage title="Deuda" />;
+  return <DeudaView />;
 }

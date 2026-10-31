@@ -652,10 +652,12 @@ export function parseStatementWorkbook(
     }
 
     // Rainman: self-transfer / own FX → Transferencia interna (never Ingresos).
+    // Assign, don't fill: Fiwind kind "transfer" hints Conversiones
+    // (TRANSFERENCIA ARS/USDC), and “A/De una cuenta tuya” must still win.
     if (isInternalTransferDescription(descriptionNormalized)) {
       payment = true;
       credit = false;
-      categoryHint = categoryHint ?? "transferencia-interna";
+      categoryHint = "transferencia-interna";
     }
 
     const partial = {

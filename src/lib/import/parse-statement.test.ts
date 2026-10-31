@@ -381,6 +381,7 @@ describe("Fiwind Actividad fixtures", () => {
         ["18/08/2026 12:02:00", "12800", 12800, "ARS", null, null, null],
         ["18/08/2026 12:03:00", "Pago a DIA", 15420.5, "ARS", null, null, null],
         ["18/08/2026 12:04:00", "Compra KO", 20, "USDC", null, null, null],
+        ["18/08/2026 12:05:00", "De una cuenta tuya", 20000, "ARS", null, null, null],
       ],
       "Actividad",
     );
@@ -405,6 +406,13 @@ describe("Fiwind Actividad fixtures", () => {
     assert.equal(numeric?.categoryHint, "conversiones");
     assert.equal(isExpenseRow(dia!), true);
     assert.equal(isExpenseRow(ko!), false);
+    const propia = parsed.movements.find((m) =>
+      /CUENTA TUYA/i.test(m.descriptionNormalized),
+    );
+    assert.equal(propia?.categoryHint, "transferencia-interna");
+    assert.equal(propia?.isPayment, true);
+    assert.equal(propia?.isCredit, false);
+    assert.equal(isExpenseRow(propia!), false);
     assert.equal(isBankAccountingEntry("TRANSFERENCIA ARS"), true);
     assert.equal(isBankAccountingEntry("12800"), true);
     assert.equal(isBankAccountingEntry("COMPRA SUPER ARS"), false);
