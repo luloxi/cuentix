@@ -1,7 +1,7 @@
 /**
  * Pure helpers for hogar-service reimbursements (rent/utilities already paid
- * by a roommate). Client-safe — no DB / next/headers imports.
- * UI must not echo full legal names.
+ * by a roommate). Client-safe — no DB, no env, no next/headers imports.
+ * Payee groups are passed in by the caller. UI must not echo full legal names.
  */
 
 import { isInternalTransferDescription } from "@/lib/bbva/bank-entries";
@@ -11,8 +11,9 @@ import { isHogarUtilitySlug } from "@/lib/gasto-cubierto";
  * Roommate payee(s) who front rent/utilities, configured per deployment so no
  * real names live in the repo. Format: comma-separated groups; inside a group
  * join the name tokens with "+" (all must appear). Example:
- *   NEXT_PUBLIC_REINTEGRO_PAYEES="ANA+PEREZ,ANITA"
- * Empty/unset = feature off.
+ *   REINTEGRO_PAYEES="ANA+PEREZ,ANITA"
+ * Empty/unset = feature off. The server / Worker parses this; this module
+ * does not read the environment.
  */
 export function parseReintegroPayees(raw: string | undefined | null): string[][] {
   return String(raw ?? "")
@@ -25,10 +26,6 @@ export function parseReintegroPayees(raw: string | undefined | null): string[][]
         .filter(Boolean),
     )
     .filter((g) => g.length > 0);
-}
-
-export function reintegroPayeeGroups(): string[][] {
-  return parseReintegroPayees(process.env.NEXT_PUBLIC_REINTEGRO_PAYEES);
 }
 
 /** Outbound person payment / transfer prefixes (Fiwind + similar). */
@@ -47,10 +44,11 @@ function normalizeKey(description: string): string {
 /**
  * True when the description looks like a payment to the roommate who often
  * fronts alquiler/luz/agua/internet — those must not double-count in Hogar.
+ * Outbound-prefix variant only (not a bare payee line).
  */
 export function looksLikeHogarReintegroPayee(
   description: string,
-  groups: string[][] = reintegroPayeeGroups(),
+  groups: string[][],
 ): boolean {
   const key = normalizeKey(description);
   if (!key) return false;
@@ -67,7 +65,7 @@ export function looksLikeHogarReintegroPayee(
  */
 export function looksLikeBareHogarReintegroPayee(
   description: string,
-  groups: string[][] = reintegroPayeeGroups(),
+  groups: string[][],
 ): boolean {
   const key = normalizeKey(description);
   if (!key) return false;
@@ -90,26 +88,30 @@ export function looksLikeBareHogarReintegroPayee(
 }
 
 /** Outbound-prefix OR bare-payee hogar reintegro description. */
-export function isHogarReintegroDescription(description: string): boolean {
+export function isHogarReintegroDescription(
+  description: string,
+  groups: string[][],
+): boolean {
   return (
-    looksLikeHogarReintegroPayee(description) ||
-    looksLikeBareHogarReintegroPayee(description)
+    looksLikeHogarReintegroPayee(description, groups) ||
+    looksLikeBareHogarReintegroPayee(description, groups)
   );
 }
 
 /**
  * Card payments / internal transfers (isPayment) stay out of Consumos.
  * Exceptions that stay visible (still out of neta via isPayment):
- * - Hogar-service reintegros → Tipo "Reintegro hogar"
+ * - Hogar-service reintegros → Tipo "Reintegro hogar" (`reintegroHogar` flag)
  * - Utility bills marked cubierto → Tipo "Cubierto"
  */
 export function isConsumosHiddenPayment(
   isPayment: boolean,
   descriptionNormalized: string,
   categorySlug?: string | null,
+  reintegroHogar = false,
 ): boolean {
   if (!isPayment) return false;
-  if (isHogarReintegroDescription(descriptionNormalized)) return false;
+  if (reintegroHogar) return false;
   if (isHogarUtilitySlug(categorySlug)) return false;
   // Rainman: Transferencia interna stays visible (out of neta) like Cubierto —
   // by category slug OR description (CR TBE / cuenta tuya) if category never seeded.
@@ -120,12 +122,12 @@ export function isConsumosHiddenPayment(
   return true;
 }
 
-/** True when Tipo should show "Reintegro hogar". */
+/** True when Tipo should show "Reintegro hogar". The flag comes from the server. */
 export function isReintegroHogarTipo(
   isPayment: boolean,
-  descriptionNormalized: string,
+  reintegroHogar: boolean,
 ): boolean {
-  return isPayment && isHogarReintegroDescription(descriptionNormalized);
+  return isPayment && reintegroHogar;
 }
 
 /** Same payee key for bulk “Aplicar a N” (exact normalized description). */
@@ -142,10 +144,11 @@ export function countHogarReintegroMatches(
     isPayment?: boolean;
   }>,
   description: string,
+  groups: string[][],
   opts?: { excludeTxId?: string; onlyUnset?: boolean },
 ): number {
   const key = normalizeKey(description);
-  if (!key || !looksLikeHogarReintegroPayee(description)) return 0;
+  if (!key || !looksLikeHogarReintegroPayee(description, groups)) return 0;
   let n = 0;
   for (const tx of rows) {
     if (opts?.excludeTxId && tx.id === opts.excludeTxId) continue;

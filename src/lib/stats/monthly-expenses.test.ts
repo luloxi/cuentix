@@ -1,4 +1,3 @@
-process.env.NEXT_PUBLIC_REINTEGRO_PAYEES = "ANA+LOPEZ,ANITA";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -15,7 +14,11 @@ import {
   visibleExpenseRows,
   type ExpenseTx,
 } from "./monthly-expenses";
+import { parseReintegroPayees } from "@/lib/reintegro-hogar";
 import type { MonthEndRate } from "@/lib/fx/month-end-rates";
+
+const PAYEES = parseReintegroPayees("ANA+LOPEZ,ANITA");
+const NO_PAYEES: string[][] = [];
 
 function tx(
   partial: Partial<ExpenseTx> & Pick<ExpenseTx, "date" | "descriptionNormalized">,
@@ -335,6 +338,7 @@ describe("Cubierto fuera de neta", () => {
           categoryId: "cat-luz",
         },
         cats,
+        NO_PAYEES,
       ),
       true,
     );
@@ -346,6 +350,7 @@ describe("Cubierto fuera de neta", () => {
           categoryId: null,
         },
         cats,
+        NO_PAYEES,
       ),
       false,
     );
@@ -357,6 +362,7 @@ describe("Cubierto fuera de neta", () => {
           categoryId: "cat-luz",
         },
         cats,
+        PAYEES,
       ),
       false,
       "roommate reintegro must not count as Cubierto even if miscategorized",
@@ -369,6 +375,7 @@ describe("Cubierto fuera de neta", () => {
           categoryId: "cat-luz",
         },
         cats,
+        NO_PAYEES,
       ),
       false,
     );
@@ -397,7 +404,7 @@ describe("Cubierto fuera de neta", () => {
         categoryId: "cat-super",
       }),
     ];
-    const cubiertos = rows.filter((r) => isCubiertoUtilityRow(r, cats));
+    const cubiertos = rows.filter((r) => isCubiertoUtilityRow(r, cats, NO_PAYEES));
     const byP = aggregateCubiertoByPeriod(cubiertos);
     const sep = byP.get("2026-09");
     assert.equal(sep?.amountArs, 15000);
@@ -448,7 +455,7 @@ describe("Cubierto fuera de neta", () => {
         ownership: "personal",
       }),
     ];
-    const vis = visibleCubiertoRows(rows, "user-1", cats);
+    const vis = visibleCubiertoRows(rows, "user-1", cats, NO_PAYEES);
     assert.deepEqual(
       vis.map((r) => r.descriptionNormalized),
       ["EDESUR"],

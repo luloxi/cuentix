@@ -3,6 +3,7 @@ import { isBankAccountingEntry } from "@/lib/bbva/bank-entries";
 import { isHogarUtilityCategory } from "@/lib/gasto-cubierto";
 import { isPeriodDebtSource } from "@/lib/import/source";
 import { isHogarReintegroDescription } from "@/lib/reintegro-hogar";
+import { reintegroPayeeGroups } from "@/lib/reintegro-hogar-server";
 import { isVisibleToUser } from "@/lib/transactions";
 import {
   currentPeriodAr,
@@ -256,9 +257,10 @@ export function isCubiertoUtilityRow(
     categoryId: string | null;
   },
   categoryById: Map<string, CategoryRef>,
+  groups: string[][] = reintegroPayeeGroups(),
 ): boolean {
   if (!r.isPayment) return false;
-  if (isHogarReintegroDescription(r.descriptionNormalized)) return false;
+  if (isHogarReintegroDescription(r.descriptionNormalized, groups)) return false;
   const cat = r.categoryId ? categoryById.get(r.categoryId) : undefined;
   return isHogarUtilityCategory({
     slug: cat?.slug,
@@ -270,11 +272,12 @@ export function visibleCubiertoRows<T extends ExpenseTx>(
   rows: T[],
   viewerUserId: string,
   categoryById: Map<string, CategoryRef>,
+  groups: string[][] = reintegroPayeeGroups(),
 ): T[] {
   return rows.filter(
     (r) =>
       isVisibleToUser(r, viewerUserId) &&
-      isCubiertoUtilityRow(r, categoryById),
+      isCubiertoUtilityRow(r, categoryById, groups),
   );
 }
 

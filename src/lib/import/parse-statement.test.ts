@@ -1,4 +1,3 @@
-process.env.NEXT_PUBLIC_REINTEGRO_PAYEES = "ANA+LOPEZ,ANITA";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

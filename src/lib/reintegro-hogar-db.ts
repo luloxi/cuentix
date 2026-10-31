@@ -5,6 +5,7 @@ import {
   looksLikeHogarReintegroPayee,
   normalizeHogarReintegroKey,
 } from "@/lib/reintegro-hogar";
+import { reintegroPayeeGroups } from "@/lib/reintegro-hogar-server";
 
 /** Count same-description outbound reimbursements in the household. */
 export async function countHogarReintegroByMerchant(opts: {
@@ -13,7 +14,8 @@ export async function countHogarReintegroByMerchant(opts: {
   excludeTxId?: string;
   onlyUnset?: boolean;
 }): Promise<number> {
-  if (!looksLikeHogarReintegroPayee(opts.description)) return 0;
+  const groups = reintegroPayeeGroups();
+  if (!looksLikeHogarReintegroPayee(opts.description, groups)) return 0;
   const db = (await getDb());
   const all = await db
     .select({
@@ -23,7 +25,7 @@ export async function countHogarReintegroByMerchant(opts: {
     })
     .from(schema.transactions)
     .where(eq(schema.transactions.householdId, opts.householdId));
-  return countHogarReintegroMatches(all, opts.description, {
+  return countHogarReintegroMatches(all, opts.description, groups, {
     excludeTxId: opts.excludeTxId,
     onlyUnset: opts.onlyUnset,
   });
@@ -38,7 +40,8 @@ export async function applyHogarReintegroToSimilar(opts: {
   description: string;
   excludeTxId?: string;
 }): Promise<number> {
-  if (!looksLikeHogarReintegroPayee(opts.description)) return 0;
+  const groups = reintegroPayeeGroups();
+  if (!looksLikeHogarReintegroPayee(opts.description, groups)) return 0;
   const db = (await getDb());
   const key = normalizeHogarReintegroKey(opts.description);
   if (!key) return 0;

@@ -15,6 +15,10 @@ export type MesAMesTx = {
   amountArs: number | null;
   amountUsd: number | null;
   isPayment?: boolean;
+  /** Server flag: outbound-prefix payee OR bare payee. Missing on old responses. */
+  reintegroHogar?: boolean;
+  /** Server flag: outbound-prefix payee only. Missing on old responses. */
+  reintegroPayee?: boolean;
   ownership: "personal" | "shared";
   category: CategoryOpt | null;
   isBusiness?: boolean;
@@ -63,7 +67,7 @@ export function MesAMesTxRow({
         : [];
   const assignValue = isReintegroHogarTipo(
     Boolean(t.isPayment),
-    t.descriptionNormalized,
+    Boolean(t.reintegroHogar),
   )
     ? "reintegro"
     : isTransferenciaInternaTipo(Boolean(t.isPayment), t.category, t.descriptionNormalized)

@@ -8,7 +8,11 @@ import { isPeriodDebtSource } from "@/lib/import/source";
 import { getDb, schema } from "@/lib/db";
 import { getCategoryMap } from "@/lib/household";
 import { periodFromDateString } from "@/lib/utils";
-import { isConsumosHiddenPayment } from "@/lib/reintegro-hogar";
+import {
+  isConsumosHiddenPayment,
+  isHogarReintegroDescription,
+} from "@/lib/reintegro-hogar";
+import { reintegroPayeeGroups } from "@/lib/reintegro-hogar-server";
 import { resolveAmountUpdates } from "@/lib/transaction-amounts";
 
 /**
@@ -138,6 +142,7 @@ export async function listTransactions(
   const db = (await getDb());
   const { byId, bySlug } = await getCategoryMap();
   const uncatId = bySlug.get("uncategorized")?.id ?? null;
+  const payeeGroups = reintegroPayeeGroups();
 
   const rows = await db
     .select()
@@ -152,6 +157,7 @@ export async function listTransactions(
         r.isPayment,
         r.descriptionNormalized,
         r.categoryId ? byId.get(r.categoryId)?.slug : null,
+        isHogarReintegroDescription(r.descriptionNormalized, payeeGroups),
       )
     ) {
       return false;
