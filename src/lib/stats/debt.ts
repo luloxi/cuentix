@@ -13,6 +13,34 @@ import { isPeriodDebtSource } from "@/lib/import/source";
 /** Below this, Casita shows “Saldada” — only when a snapshot exists. */
 export const SETTLED_THRESHOLD_ARS = 50;
 
+/**
+ * Home deuda figure. `forceSettled` zeros both currencies. So does a card
+ * whose statements are all closed (open history must not keep a stale saldo).
+ * Mixed open/closed statements keep the editable saldo; closed rows are
+ * dropped later by `statementClosed` inside `computeCardDebt`.
+ */
+export function debtFigure(input: {
+  forceSettled: boolean;
+  saldoArs: number | null;
+  saldoUsd: number | null;
+  closedStatements: number;
+  openStatements: number;
+}): { balanceArs: number; balanceUsd: number; settled: boolean } {
+  if (input.forceSettled || (input.closedStatements > 0 && input.openStatements === 0)) {
+    return { balanceArs: 0, balanceUsd: 0, settled: true };
+  }
+  if (input.saldoArs == null && input.saldoUsd == null) {
+    return { balanceArs: 0, balanceUsd: 0, settled: false };
+  }
+  const balanceArs = Math.abs(input.saldoArs ?? 0);
+  const balanceUsd = Math.abs(input.saldoUsd ?? 0);
+  return {
+    balanceArs,
+    balanceUsd,
+    settled: balanceArs < SETTLED_THRESHOLD_ARS,
+  };
+}
+
 /** Lookback from the newest Últimos movimientos date. */
 export const SNAPSHOT_LOOKBACK_DAYS = 21;
 
@@ -37,6 +65,8 @@ export type DebtTx = {
   bank?: string | null;
   cardLast4?: string | null;
   statementId?: string | null;
+  /** Statement marked closed. Kept in history, dropped from active debt. */
+  statementClosed?: boolean | null;
 };
 
 export type DebtSettingsInput = {
@@ -190,6 +220,7 @@ function toArs(
 }
 
 function isChargeRow(r: DebtTx): boolean {
+  if (r.statementClosed) return false;
   if (r.isPayment || r.isCredit) return false;
   if (isCardPaymentEntry(r.descriptionNormalized)) return false;
   if (isBankAccountingEntry(r.descriptionNormalized)) return false;
@@ -278,6 +309,7 @@ export function isSnapshotDebtRow(r: { source?: string | null }): boolean {
  */
 export function isCardSnapshotActivity(r: DebtTx): boolean {
   const desc = r.descriptionNormalized ?? "";
+  if (r.statementClosed) return false;
   if (isCardPaymentEntry(desc)) return true;
   if (isInternalTransferDescription(desc)) return false;
   if (isBankAccountingEntry(desc)) return false;
@@ -404,6 +436,7 @@ export function computeCardDebt(
 
   const mine = rows.filter(
     (r) =>
+      !r.statementClosed &&
       isPrivateToUser(r, opts.userId) &&
       isBbvaCardDebtRow(r) &&
       r.ownership !== "shared",

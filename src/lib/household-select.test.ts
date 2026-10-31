@@ -3,31 +3,60 @@ import { describe, it } from "node:test";
 import { pickActiveHouseholdId } from "./household-select";
 
 describe("pickActiveHouseholdId", () => {
-  const casita = {
-    householdId: "hh-casita",
+  const shared = {
+    householdId: "hh-shared",
     joinedAt: new Date("2025-01-01"),
   };
-  const iog = {
-    householdId: "hh-invoice-iog",
+  const work = {
+    householdId: "hh-work",
     joinedAt: new Date("2026-09-01"),
   };
 
-  it("defaults to the oldest hogar (Casita) so Invoice IOG is not mixed in", () => {
-    assert.equal(pickActiveHouseholdId([iog, casita]), "hh-casita");
+  it("defaults to the oldest hogar (Shared) so Work is not mixed in", () => {
+    assert.equal(pickActiveHouseholdId([work, shared]), "hh-shared");
     assert.equal(pickActiveHouseholdId([]), null);
   });
 
-  it("honors an explicit switch to Invoice IOG", () => {
+  it("honors an explicit switch to Work", () => {
     assert.equal(
-      pickActiveHouseholdId([casita, iog], "hh-invoice-iog"),
-      "hh-invoice-iog",
+      pickActiveHouseholdId([shared, work], "hh-work"),
+      "hh-work",
     );
   });
 
   it("ignores a stale preferred id that the user does not belong to", () => {
     assert.equal(
-      pickActiveHouseholdId([casita, iog], "hh-deleted"),
-      "hh-casita",
+      pickActiveHouseholdId([shared, work], "hh-deleted"),
+      "hh-shared",
+    );
+  });
+
+  it("defaults to Personal when that hogar exists, even if Shared is older", () => {
+    const personal = {
+      householdId: "hh-personal",
+      name: "Personal",
+      joinedAt: new Date("2026-09-07"),
+    };
+    assert.equal(
+      pickActiveHouseholdId(
+        [{ ...shared, name: "Shared" }, personal, { ...work, name: "Work" }],
+      ),
+      "hh-personal",
+    );
+  });
+
+  it("keeps the cookie when it points at Shared", () => {
+    const personal = {
+      householdId: "hh-personal",
+      name: "Personal",
+      joinedAt: new Date("2026-09-07"),
+    };
+    assert.equal(
+      pickActiveHouseholdId(
+        [{ ...shared, name: "Shared" }, personal],
+        "hh-shared",
+      ),
+      "hh-shared",
     );
   });
 });

@@ -182,6 +182,7 @@ export function AddExpenseModal({
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateNote, setDuplicateNote] = useState<string | null>(null);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
 
@@ -220,6 +221,7 @@ export function AddExpenseModal({
       setImporting(false);
       setSaving(false);
       setError(null);
+      setDuplicateNote(null);
       setScanNote(null);
       setImportNote(null);
     }
@@ -450,10 +452,22 @@ export function AddExpenseModal({
         credentials: "include",
         body: JSON.stringify(payload),
       });
-      const data = await res.json().catch(() => null);
+      const data = (await res.json().catch(() => null)) as {
+        error?: string;
+        possibleDuplicate?: boolean;
+      } | null;
       if (!res.ok) throw new Error(data?.error || "No se pudo guardar");
+      if (data?.possibleDuplicate) {
+        setDuplicateNote(
+          "Posible duplicado: ya hay un gasto igual ese día. Se guardó igual.",
+        );
+        // onCreated() closes the dialog immediately. Refresh the lists and
+        // leave this note up until the delayed close.
+        window.dispatchEvent(new Event("lc:expense-created"));
+        window.setTimeout(() => onClose(), 2400);
+        return;
+      }
       onCreated();
-      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al guardar");
     } finally {
@@ -869,6 +883,11 @@ export function AddExpenseModal({
               {error && (
                 <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
                   {error}
+                </p>
+              )}
+              {duplicateNote && (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                  {duplicateNote}
                 </p>
               )}
 

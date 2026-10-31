@@ -53,6 +53,7 @@ export async function activeHousehold(
   const id = pickActiveHouseholdId(
     list.map((row) => ({
       householdId: row.id,
+      name: row.name,
       joinedAt: row.joinedAt == null ? null : new Date(row.joinedAt),
     })),
     preferred,
