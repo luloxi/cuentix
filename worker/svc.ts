@@ -29,11 +29,12 @@ export async function handleSvc(req: Request, env: Env): Promise<Response> {
   return json({ error: "No encontrado" }, 404);
 }
 
-async function requireServiceUser(req: Request, env: Env): Promise<SessionUser | Response> {
-  const presented = bearerToken(req);
-  const matches = await serviceTokenMatches(presented, env.MCP_SERVICE_TOKEN);
-  if (!matches) return json({ error: "No autenticado" }, 401);
-
+/**
+ * Owner of the service API. `MCP_SERVICE_USER_EMAIL`, or the admin email when
+ * that var is unset. Shared with `McpRpc` (no bearer: the service binding is
+ * the trust boundary). Returns null when that user is not in `auth_user`.
+ */
+export async function resolveServiceOwner(env: Env): Promise<SessionUser | null> {
   const configured = env.MCP_SERVICE_USER_EMAIL?.trim().toLowerCase();
   const email = configured || ADMIN_EMAIL;
   const row = await env.DB.prepare(
@@ -41,8 +42,17 @@ async function requireServiceUser(req: Request, env: Env): Promise<SessionUser |
   )
     .bind(email)
     .first<SessionUser>();
-  if (!row?.id || !row.email) return json({ error: "No autenticado" }, 401);
+  if (!row?.id || !row.email) return null;
   return { id: row.id, email: row.email, name: row.name ?? null, image: row.image ?? null };
+}
+
+async function requireServiceUser(req: Request, env: Env): Promise<SessionUser | Response> {
+  const presented = bearerToken(req);
+  const matches = await serviceTokenMatches(presented, env.MCP_SERVICE_TOKEN);
+  if (!matches) return json({ error: "No autenticado" }, 401);
+  const user = await resolveServiceOwner(env);
+  if (!user) return json({ error: "No autenticado" }, 401);
+  return user;
 }
 
 function bearerToken(req: Request): string {
@@ -79,25 +89,55 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 async function resumenMensual(req: Request, env: Env, user: SessionUser): Promise<Response> {
-  const range = parseMonthRange(new URL(req.url));
-  if (range instanceof Response) return range;
-  const built = await buildMonthlyResumen(req, env, user, range.from, range.to);
+  const url = new URL(req.url);
+  const built = await buildSvcResumenMensual(
+    env,
+    { from: url.searchParams.get("from"), to: url.searchParams.get("to") },
+    user,
+    req,
+  );
   if (built instanceof Response) return built;
   return json(built);
 }
 
+/** Same body as `GET /api/svc/resumen-mensual`. `req` keeps the household cookie. */
+export async function buildSvcResumenMensual(
+  env: Env,
+  params: { from?: unknown; to?: unknown },
+  user: SessionUser,
+  req?: Request,
+) {
+  const range = parseMonthRange(params.from, params.to);
+  if (range instanceof Response) return range;
+  const built = await buildMonthlyResumen(req ?? bareRequest(), env, user, range.from, range.to);
+  if (built instanceof Response) return built;
+  return built;
+}
+
 async function deudaAhorroPatrimonio(req: Request, env: Env, user: SessionUser): Promise<Response> {
+  return json(await buildSvcDeudaAhorroPatrimonio(env, {}, user, req));
+}
+
+/** Same body as `GET /api/svc/deuda-ahorro-patrimonio`. `params` is unused. */
+export async function buildSvcDeudaAhorroPatrimonio(
+  env: Env,
+  params: unknown,
+  user: SessionUser,
+  req?: Request,
+) {
+  void params;
+  const scoped = req ?? bareRequest();
   const [debt, savings, patrimonio] = await Promise.all([
     buildDebtStats(env, user),
     buildAhorros(env, user),
-    buildPatrimonio(req, env, user),
+    buildPatrimonio(scoped, env, user),
   ]);
   const changes = netWorthDeltas(
     patrimonio.current.date,
     patrimonio.current.netWorthArs,
     patrimonio.series,
   );
-  return json({
+  return {
     debt: {
       cardStatus: debt.cardStatus,
       summary: debt.summary,
@@ -107,39 +147,68 @@ async function deudaAhorroPatrimonio(req: Request, env: Env, user: SessionUser):
       ...patrimonio,
       changes,
     },
-  });
+  };
 }
 
 async function ultimosMovimientos(req: Request, env: Env, user: SessionUser): Promise<Response> {
   const url = new URL(req.url);
-  const limit = parseLimit(url.searchParams.get("limit"));
-  if (limit instanceof Response) return limit;
-  const period = url.searchParams.get("period");
-  if (period != null && period !== "" && !periodRange(period)) {
-    return json({ error: "Período inválido" }, 400);
-  }
-  const page = await listServiceMovements(req, env, user, { limit });
-  if (page instanceof Response) return page;
-  return json({ limit, total: page.total, movements: page.movements });
+  const built = await buildSvcUltimosMovimientos(
+    env,
+    {
+      limit: url.searchParams.get("limit"),
+      period: url.searchParams.get("period"),
+      q: url.searchParams.get("q"),
+    },
+    user,
+    req,
+  );
+  if (built instanceof Response) return built;
+  return json(built);
 }
 
-function parseMonthRange(url: URL): { from: string; to: string } | Response {
-  const fromRaw = url.searchParams.get("from");
-  const toRaw = url.searchParams.get("to");
-  const hasFrom = fromRaw != null && fromRaw !== "";
-  const hasTo = toRaw != null && toRaw !== "";
+/** Same body as `GET /api/svc/ultimos-movimientos`. `q` is the HTTP search param. */
+export async function buildSvcUltimosMovimientos(
+  env: Env,
+  params: { limit?: unknown; period?: unknown; q?: string | null },
+  user: SessionUser,
+  req?: Request,
+) {
+  const limit = parseLimit(params.limit);
+  if (limit instanceof Response) return limit;
+  const period = params.period;
+  if (period != null && period !== "" && (typeof period !== "string" || !periodRange(period))) {
+    return json({ error: "Período inválido" }, 400);
+  }
+  const scoped =
+    req ??
+    movementsRequest(
+      typeof period === "string" && period !== "" ? period : null,
+      typeof params.q === "string" ? params.q : null,
+    );
+  const page = await listServiceMovements(scoped, env, user, { limit });
+  if (page instanceof Response) return page;
+  return { limit, total: page.total, movements: page.movements };
+}
+
+function parseMonthRange(fromRaw: unknown, toRaw: unknown): { from: string; to: string } | Response {
+  if (fromRaw != null && typeof fromRaw !== "string") return json({ error: "Período inválido" }, 400);
+  if (toRaw != null && typeof toRaw !== "string") return json({ error: "Período inválido" }, 400);
+  const fromText = typeof fromRaw === "string" ? fromRaw : null;
+  const toText = typeof toRaw === "string" ? toRaw : null;
+  const hasFrom = fromText != null && fromText !== "";
+  const hasTo = toText != null && toText !== "";
   if (hasFrom !== hasTo) return json({ error: "Período inválido" }, 400);
 
   let from: string;
   let to: string;
-  if (!hasFrom || !hasTo || fromRaw == null || toRaw == null) {
+  if (!hasFrom || !hasTo || fromText == null || toText == null) {
     to = currentPeriodAr();
     from = shiftPeriod(to, -(DEFAULT_MONTHS - 1));
-  } else if (!periodRange(fromRaw) || !periodRange(toRaw)) {
+  } else if (!periodRange(fromText) || !periodRange(toText)) {
     return json({ error: "Período inválido" }, 400);
   } else {
-    from = fromRaw;
-    to = toRaw;
+    from = fromText;
+    to = toText;
   }
   if (from > to || monthSpan(from, to) > MAX_MONTHS) {
     return json({ error: "Período inválido" }, 400);
@@ -153,13 +222,30 @@ function monthSpan(from: string, to: string): number {
   return (ty - fy) * 12 + (tm - fm) + 1;
 }
 
-function parseLimit(raw: string | null): number | Response {
-  if (raw == null || raw.trim() === "") return DEFAULT_LIMIT;
+function parseLimit(raw: unknown): number | Response {
+  if (raw == null) return DEFAULT_LIMIT;
+  if (typeof raw === "number") {
+    if (!Number.isInteger(raw)) return json({ error: "Límite inválido" }, 400);
+    return parseLimit(String(raw));
+  }
+  if (typeof raw !== "string") return json({ error: "Límite inválido" }, 400);
+  if (raw.trim() === "") return DEFAULT_LIMIT;
   const text = raw.trim();
   if (!/^\d{1,2}$/.test(text)) return json({ error: "Límite inválido" }, 400);
   const n = Number(text);
   if (n < 1 || n > MAX_LIMIT) return json({ error: "Límite inválido" }, 400);
   return n;
+}
+
+function bareRequest(): Request {
+  return new Request("https://cuentix.local/api/svc");
+}
+
+function movementsRequest(period: string | null, q: string | null): Request {
+  const url = new URL("https://cuentix.local/api/svc/ultimos-movimientos");
+  if (period) url.searchParams.set("period", period);
+  if (q != null && q !== "") url.searchParams.set("q", q);
+  return new Request(url);
 }
 
 function pathname(req: Request): string {

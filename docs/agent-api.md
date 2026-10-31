@@ -175,7 +175,7 @@ Cuando conectás una IA por MCP, los movimientos salen de Cuentix hacia esa IA. 
 
 ## API de servicio (solo lectura)
 
-Un Worker aparte (por ejemplo `lulox-mcp`, allowlist de una sola persona) puede leer los datos de ese usuario por HTTP. Sirve igual por HTTPS o por un service binding de Cloudflare: es un `fetch` común. No usa la cookie de la PWA ni el token del hogar. La cookie sigue siendo la única auth de `/api/dashboard` y del resto de la PWA. El bearer de este secreto no autentica esas rutas.
+Un caller servidor puede leer los datos de ese usuario por HTTP (`fetch`, incluso a través de un service binding). `lulox-mcp` no usa estas rutas: habla con el entrypoint `McpRpc` (sección de abajo). No usa la cookie de la PWA ni el token del hogar. La cookie sigue siendo la única auth de `/api/dashboard` y del resto de la PWA. El bearer de este secreto no autentica esas rutas.
 
 Solo `GET`. Cualquier otro método en `/api/svc/*` responde `405`.
 
@@ -212,3 +212,17 @@ curl -sS -H "Authorization: Bearer $MCP_SERVICE_TOKEN" \
 ```
 
 `$MCP_SERVICE_TOKEN` es un placeholder. No pegues el secreto en el repo, en un chat ni en el cliente MCP del navegador.
+
+## McpRpc (solo service binding)
+
+`lulox-mcp` llama a Cuentix por un service binding de Cloudflare al entrypoint `McpRpc` (`worker/entry.ts`, clase que extiende `WorkerEntrypoint`). No es una ruta HTTP y no lee `Authorization`. El binding es el límite de confianza: no hace falta `MCP_SERVICE_TOKEN` y no hay secretos nuevos. El usuario es el de la API de servicio (`MCP_SERVICE_USER_EMAIL`, o el email admin si falta).
+
+Cada método recibe un solo objeto y devuelve `{ ok: true, data }` o `{ ok: false, error: { code, message } }`. `code` es `no_owner`, `invalid`, `not_found`, `not_enabled` o `internal`. Un `internal` no incluye stack ni SQL. `data` es el mismo JSON que el GET de la tabla de arriba.
+
+| Método | Argumento | Igual que |
+| --- | --- | --- |
+| `resumenMensual` | `{ from?: "YYYY-MM", to?: "YYYY-MM" }` | `GET /api/svc/resumen-mensual` |
+| `deudaAhorroPatrimonio` | `{}` | `GET /api/svc/deuda-ahorro-patrimonio` |
+| `ultimosMovimientos` | `{ limit?: 1..50, period?: "YYYY-MM", query?: string }` | `GET /api/svc/ultimos-movimientos`. `query` es el `q` del HTTP, de 1 a 200 caracteres. |
+
+Si ese usuario no está en `auth_user`: `no_owner`. Mes inválido, rango invertido, más de 24 meses o `limit` fuera de 1..50: `invalid`, con las mismas reglas que el HTTP.

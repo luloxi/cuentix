@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cuentix",
   "account_id": "124b4210ff80c15610ed109083a5cf95",
-  "main": "worker/index.ts",
+  "main": "worker/entry.ts",
   "compatibility_date": "2026-10-30",
   "workers_dev": true,
   "routes": [{ "pattern": "cuentix.lulox.com.ar", "custom_domain": true }],
