@@ -31,7 +31,7 @@ type Summary = {
   totalUsd: number;
   totalUsdBanks: number;
   totalUsdc: number;
-  netArs: number;
+  netArs: number | null;
   blueRate: number | null;
   balanceNote?: string | null;
 };
@@ -235,7 +235,7 @@ export function AhorrosView() {
           type="button"
           onClick={() => void load(true)}
           disabled={refreshing}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[11px] font-medium text-[var(--muted-fg)] transition hover:text-[var(--foreground)] disabled:opacity-60"
+          className="inline-flex min-h-10 min-w-10 cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 text-[11px] font-medium text-[var(--muted-fg)] transition hover:text-[var(--foreground)] disabled:opacity-60"
         >
           <RefreshCw
             className={cn("h-3.5 w-3.5", refreshing && "animate-spin")}
@@ -248,10 +248,15 @@ export function AhorrosView() {
         <Surface className="!p-4">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <p className="text-3xl font-semibold tabular-nums tracking-tight text-[var(--foreground)]">
-              {formatArs(Math.round(summary.netArs))}
+              {summary.netArs == null ? "Sin cotización" : formatArs(Math.round(summary.netArs))}
             </p>
             <p className="text-[11px] text-[var(--muted-fg)]">neto en pesos</p>
           </div>
+          {summary.netArs == null && (
+            <p className="mt-0.5 text-[10px] text-[var(--muted-fg)]">
+              Sin cotización blue. No valuamos los dólares en 0.
+            </p>
+          )}
           {summary.blueRate != null && summary.blueRate > 0 && (
             <p className="mt-0.5 text-[10px] text-[var(--muted-fg)]">
               Incluye USD al blue (${Math.round(summary.blueRate).toLocaleString("es-AR")})
@@ -377,7 +382,7 @@ export function AhorrosView() {
           <div className="flex gap-2">
             <button
               type="button"
-              className="lc-btn lc-btn-primary flex-1"
+              className="lc-btn lc-btn-primary min-h-10 flex-1 cursor-pointer"
               disabled={saving || !canSaveEvm}
               onClick={() => void submitAdd()}
             >
@@ -385,7 +390,7 @@ export function AhorrosView() {
             </button>
             <button
               type="button"
-              className="lc-btn lc-btn-secondary"
+              className="lc-btn lc-btn-secondary min-h-10 cursor-pointer"
               onClick={() => setAddKind(null)}
             >
               Cancelar
@@ -451,7 +456,7 @@ function AddChip({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--muted-fg)] transition hover:border-[var(--brand)]/40 hover:text-[var(--brand-fg)]"
+      className="inline-flex min-h-10 min-w-10 cursor-pointer items-center gap-1.5 rounded-full border border-dashed border-[var(--border)] px-3 text-xs font-semibold text-[var(--muted-fg)] transition hover:border-[var(--brand)]/40 hover:text-[var(--brand-fg)]"
     >
       <Plus className="h-3.5 w-3.5" />
       {icon}
@@ -524,7 +529,7 @@ function WalletRow({
       {dirty && (
         <button
           type="button"
-          className="lc-btn lc-btn-primary mt-2 w-full !py-1.5 text-xs"
+          className="lc-btn lc-btn-primary mt-2 min-h-10 w-full cursor-pointer text-xs"
           onClick={() =>
             void onSave(asset.id, usd).then(() => setDirty(false))
           }
@@ -591,7 +596,7 @@ function BankRow({
       {dirty && (
         <button
           type="button"
-          className="lc-btn lc-btn-primary mt-2 w-full !py-1.5 text-xs"
+          className="lc-btn lc-btn-primary mt-2 min-h-10 w-full cursor-pointer text-xs"
           onClick={() =>
             void onSave(asset.id, ars, usd).then(() => setDirty(false))
           }

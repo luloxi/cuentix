@@ -449,7 +449,7 @@ export function DeudaView() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className="lc-btn lc-btn-primary !px-3 !py-1.5 text-sm"
+            className="lc-btn lc-btn-primary min-h-10 min-w-10 cursor-pointer !px-3 text-sm"
             disabled={savingSettings}
             onClick={() => void saveSettings()}
           >
@@ -457,7 +457,7 @@ export function DeudaView() {
           </button>
           <button
             type="button"
-            className="lc-btn lc-btn-ghost !px-3 !py-1.5 text-sm"
+            className="lc-btn lc-btn-ghost min-h-10 min-w-10 cursor-pointer !px-3 text-sm"
             disabled={savingSettings}
             onClick={() => void saveSettings({ forceSettled: !forced })}
           >

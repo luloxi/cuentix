@@ -9,6 +9,7 @@ import { handleCategories } from "./categories";
 import { handleDashboard } from "./dashboard";
 import type { Env, WorkerContext } from "./env";
 import {
+  captureDailySnapshots,
   handleAhorros,
   handleDebtSettings,
   handleDebtStats,
@@ -68,7 +69,13 @@ const worker = {
   },
 
   async scheduled(_event: unknown, env: Env, ctx: WorkerContext): Promise<void> {
-    const work = flushOutbox(env);
+    const outbox = flushOutbox(env).catch((err) => {
+      console.error("outbox flush failed", err instanceof Error ? err.message : "error");
+    });
+    const snapshots = captureDailySnapshots(env).catch((err) => {
+      console.error("patrimonio snapshot failed", err instanceof Error ? err.message : "error");
+    });
+    const work = Promise.all([outbox, snapshots]).then(() => undefined);
     ctx.waitUntil(work);
     await work;
   },

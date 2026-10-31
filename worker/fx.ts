@@ -18,6 +18,24 @@ type FxCache = {
 let cache: FxCache | null = null;
 const TTL_MS = 5 * 60 * 1000;
 
+/** Tests pin the isolate cache so handlers do not hit the network. */
+export function primeFxForTests(
+  input: { blue: number | null; byDate?: ReadonlyMap<string, number> } | null,
+): void {
+  if (input == null) {
+    cache = null;
+    return;
+  }
+  const blue =
+    input.blue != null && Number.isFinite(input.blue) && input.blue > 0 ? input.blue : null;
+  cache = {
+    at: Date.now(),
+    byDate: new Map(input.byDate ?? []),
+    live: [],
+    blue,
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;

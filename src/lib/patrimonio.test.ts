@@ -7,7 +7,9 @@ import {
   historyNote,
   historyStartsAt,
   netWorthArs,
+  pricedNetWorth,
   readDebt,
+  usableFxRate,
   type PatrimonioPoint,
 } from "./patrimonio";
 
@@ -36,6 +38,36 @@ describe("patrimonio series", () => {
     assert.equal(got.assetsArs, 100000 + 300 * 1500);
     assert.equal(netWorthArs(got.assetsArs, 0), got.assetsArs);
     assert.equal(netWorthArs(got.assetsArs, 1000), got.assetsArs - 1000);
+    assert.equal(
+      netWorthArs(got.assetsArs, 1000, 50, 1500),
+      got.assetsArs - 1000 - 50 * 1500,
+    );
+  });
+
+  it("prices USD debt only with a real blue rate", () => {
+    assert.equal(usableFxRate(null), null);
+    assert.equal(usableFxRate(0), null);
+    assert.equal(usableFxRate(Number.NaN), null);
+    assert.equal(usableFxRate(Number.POSITIVE_INFINITY), null);
+    assert.equal(usableFxRate(1400), 1400);
+    const missing = pricedNetWorth({
+      assetsArs: 100,
+      assetsUsd: 5,
+      debtArs: 10,
+      debtUsd: 2,
+      fxRate: null,
+    });
+    assert.equal(missing.fxAvailable, false);
+    assert.equal(missing.netWorthArs, null);
+    const priced = pricedNetWorth({
+      assetsArs: 1000,
+      assetsUsd: 0,
+      debtArs: 100,
+      debtUsd: 2,
+      fxRate: 500,
+    });
+    assert.equal(priced.fxAvailable, true);
+    assert.equal(priced.netWorthArs, 1000 - 100 - 2 * 500);
   });
 
   it("leaves USD unconverted when the rate is missing", () => {
@@ -109,7 +141,7 @@ describe("patrimonio series", () => {
     assert.equal(historyStartsAt(points), "2025-01-15");
     assert.equal(
       historyNote("2026-10-31"),
-      "El historial arranca el 31/10/2026. Cada visita suma un punto.",
+      "El historial arranca el 31/10/2026. Un punto por día.",
     );
     assert.equal(historyNote("2026-10-31").includes("\u2014"), false);
   });

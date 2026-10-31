@@ -379,6 +379,7 @@ export const patrimonioSnapshots = sqliteTable(
       t.date,
       t.source,
     ),
+    uniqueIndex("patrimonio_snapshots_user_date_uidx").on(t.userId, t.date),
     index("patrimonio_snapshots_user_date_idx").on(t.userId, t.date),
   ],
 );

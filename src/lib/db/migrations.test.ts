@@ -16,6 +16,7 @@ function openMigrated(): DatabaseSync {
     "0003_serpix_sync.sql",
     "0004_card_closed.sql",
     "0005_patrimonio_snapshots.sql",
+    "0006_patrimonio_user_date.sql",
   ]) {
     db.exec(readFileSync(join(root, "migrations", file), "utf8"));
   }
@@ -169,5 +170,21 @@ describe("D1 migrations on node:sqlite", () => {
     assert.equal(rows[0].id, "p1");
     assert.equal(rows[0].t, "text");
     assert.equal(rows[0].assets_ars, "150000.00");
+    const indexes = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'patrimonio_snapshots'",
+      )
+      .all() as Array<{ name: string }>;
+    const names = new Set(indexes.map((row) => row.name));
+    assert.ok(names.has("patrimonio_snapshots_user_date_uidx"));
+    assert.throws(() =>
+      db
+        .prepare(
+          `INSERT INTO patrimonio_snapshots (
+             id, user_id, date, source
+           ) VALUES ('p3', 'u1', '2026-10-31', 'manual')`,
+        )
+        .run(),
+    );
   });
 });

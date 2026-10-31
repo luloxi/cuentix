@@ -46,8 +46,39 @@ export function assetsEquivalent(input: {
   return { assetsUsd, assetsArs: bankArs + assetsUsd * rate };
 }
 
-export function netWorthArs(assetsArs: number, debtArs: number): number {
-  return finite(assetsArs) - finite(debtArs);
+/** Blue quote that can price USD. Null, 0, and non-finite are missing. */
+export function usableFxRate(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Pesos net of ARS debt and USD debt at `fxRate`. A missing rate prices USD debt at 0. */
+export function netWorthArs(
+  assetsArs: number,
+  debtArs: number,
+  debtUsd = 0,
+  fxRate: number | null = null,
+): number {
+  return finite(assetsArs) - finite(debtArs) - finite(debtUsd) * positiveRate(fxRate);
+}
+
+/**
+ * Full net worth only when every USD leg can be priced.
+ * Missing blue does not become a zero rate.
+ */
+export function pricedNetWorth(input: {
+  assetsArs: number;
+  assetsUsd: number;
+  debtArs: number;
+  debtUsd: number;
+  fxRate: number | null;
+}): { netWorthArs: number | null; fxAvailable: boolean } {
+  const rate = usableFxRate(input.fxRate);
+  const needsFx = finite(input.assetsUsd) > 0 || finite(input.debtUsd) > 0;
+  if (rate == null && needsFx) return { netWorthArs: null, fxAvailable: false };
+  return {
+    netWorthArs: netWorthArs(input.assetsArs, input.debtArs, input.debtUsd, rate),
+    fxAvailable: rate != null,
+  };
 }
 
 /**
@@ -115,10 +146,10 @@ export function historyStartsAt(points: PatrimonioPoint[]): string | null {
 /** Spanish note. No em dash. */
 export function historyNote(firstDate: string | null): string {
   if (!firstDate) {
-    return "Todavía no hay puntos. Abrí esta pantalla para guardar el de hoy.";
+    return "Todavía no hay puntos. El de hoy se guarda una vez por día.";
   }
   const [year, month, day] = firstDate.split("-");
-  return `El historial arranca el ${day}/${month}/${year}. Cada visita suma un punto.`;
+  return `El historial arranca el ${day}/${month}/${year}. Un punto por día.`;
 }
 
 function finite(value: number | null | undefined): number {
