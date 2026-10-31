@@ -73,6 +73,10 @@ export function isOwnAccountTransferDescription(
   const u = foldDesc(description);
   if (!u) return false;
 
+  // Fiwind Actividad “Depósito de cuenta propia” is a wallet credit, not a
+  // pocket move. “CUENTA PROPIA” below is for BBVA “TRANSF A CUENTA PROPIA”.
+  if (/^DEPOSITO\b/.test(u)) return false;
+
   // Fiwind / BBVA explicit own-account
   if (/\b(A|DE)\s+(UNA\s+)?CUENTA\s+TUYA\b/.test(u)) return true;
   if (u.includes("CUENTA PROPIA")) return true;
