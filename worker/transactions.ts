@@ -525,6 +525,7 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
       amountUsd: amountUsdText != null ? Number(amountUsdText) : null,
       ownership,
       categoryId,
+      ...reintegroFlags(description, env.REINTEGRO_PAYEES),
     },
     receipt,
     ...(alloc.possibleDuplicate
