@@ -4,9 +4,10 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { FIWIND_ECHO_CANDIDATE_SQL } from "./fiwind-dups";
 import { annotateIncomeRows, sumIncomeArs } from "./income";
 import { ARS_EXPR, consumosVisibleSql, expenseSql } from "./sql";
-import { TRANSFER_CANDIDATE_SQL, loadExcludedMovementIds } from "./transfer-class";
+import { INCOME_TWIN_SQL, TRANSFER_CANDIDATE_SQL, loadExcludedMovementIds } from "./transfer-class";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CUIT = "1".repeat(11);
@@ -108,9 +109,82 @@ function idsWhere(db: DatabaseSync, sql: string): Set<string> {
   return new Set(rows.map((row) => row.id));
 }
 
+/** Top-level `UNION ALL` count plus one. Unions inside CTE bodies do not count. */
+function compoundTermCount(sql: string): number {
+  let depth = 0;
+  let unions = 0;
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === quote) {
+          if (sql[i + 1] === quote) {
+            i += 2;
+            continue;
+          }
+          break;
+        }
+        i += 1;
+      }
+      i += 1;
+      continue;
+    }
+    if (ch === "-" && sql[i + 1] === "-") {
+      i += 2;
+      while (i < sql.length && sql[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "(") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      i += 1;
+      continue;
+    }
+    if (depth === 0 && /^union\s+all\b/i.test(sql.slice(i))) {
+      unions += 1;
+      i += 5;
+      continue;
+    }
+    i += 1;
+  }
+  return unions + 1;
+}
+
+function assertIndexedPlan(plan: Array<{ detail: string }>) {
+  const detail = plan.map((line) => line.detail).join("\n");
+  // Date windows are household_id + date on tx_household_date_idx.
+  // A SCAN of alias t or m is a transactions scan. CTE scans (tr, n) are fine.
+  assert.match(detail, /tx_household_date_idx \(household_id=\? AND date>\? AND date<\?\)/);
+  assert.match(detail, /hm_user_idx \(user_id=\?\)/);
+  const tableScans = plan.filter((line) => /\bSCAN\s+(t|m)\b/.test(line.detail));
+  assert.deepEqual(
+    tableScans.map((line) => line.detail),
+    [],
+    detail,
+  );
+}
+
 describe("TRANSFER_CANDIDATE_SQL", () => {
-  it("binds the user three times and reads transactions through the household date index", () => {
-    assert.equal(TRANSFER_CANDIDATE_SQL.split("?").length - 1, 3);
+  it("keeps each candidate statement within D1's five-term compound SELECT limit", () => {
+    const statements = [FIWIND_ECHO_CANDIDATE_SQL, TRANSFER_CANDIDATE_SQL, INCOME_TWIN_SQL];
+    for (const sql of statements) {
+      assert.equal(compoundTermCount(sql) <= 5, true);
+    }
+    assert.equal(compoundTermCount(FIWIND_ECHO_CANDIDATE_SQL), 4);
+    assert.equal(compoundTermCount(TRANSFER_CANDIDATE_SQL), 5);
+    assert.equal(compoundTermCount(INCOME_TWIN_SQL), 2);
+  });
+
+  it("binds the user on each statement and reads transactions through the household date index", () => {
+    assert.equal(TRANSFER_CANDIDATE_SQL.split("?").length - 1, 1);
+    assert.equal(INCOME_TWIN_SQL.split("?").length - 1, 3);
     const db = openDb();
     seedPeople(db);
     insertTx(db, {
@@ -128,20 +202,14 @@ describe("TRANSFER_CANDIDATE_SQL", () => {
       label: "TRANSFERENCIA",
       amountArs: "100",
     });
-    const plan = db.prepare(`EXPLAIN QUERY PLAN ${TRANSFER_CANDIDATE_SQL}`).all("user-u", "user-u", "user-u") as Array<{
+    const transferPlan = db.prepare(`EXPLAIN QUERY PLAN ${TRANSFER_CANDIDATE_SQL}`).all("user-u") as Array<{
       detail: string;
     }>;
-    const detail = plan.map((line) => line.detail).join("\n");
-    // Date windows are household_id + date on tx_household_date_idx.
-    // A SCAN of alias t or m is a transactions scan. CTE scans (tr, n) are fine.
-    assert.match(detail, /tx_household_date_idx \(household_id=\? AND date>\? AND date<\?\)/);
-    assert.match(detail, /hm_user_idx \(user_id=\?\)/);
-    const tableScans = plan.filter((line) => /\bSCAN\s+(t|m)\b/.test(line.detail));
-    assert.deepEqual(
-      tableScans.map((line) => line.detail),
-      [],
-      detail,
-    );
+    const incomePlan = db.prepare(`EXPLAIN QUERY PLAN ${INCOME_TWIN_SQL}`).all("user-u", "user-u", "user-u") as Array<{
+      detail: string;
+    }>;
+    assertIndexedPlan(transferPlan);
+    assertIndexedPlan(incomePlan);
   });
 });
 
@@ -493,7 +561,7 @@ describe("transfer exclusion in the expense fragment", () => {
     assert.equal(bare?.revisar, true);
   });
 
-  it("returns no internal ids when the statement fails and does not log the user id", async () => {
+  it("returns no internal ids when the transfer statement fails and does not log the user id", async () => {
     const lines: string[] = [];
     const original = console.error;
     console.error = (...args: unknown[]) => {
@@ -523,6 +591,73 @@ describe("transfer exclusion in the expense fragment", () => {
       assert.equal(transferLog?.includes("user-secret-id"), false);
       assert.equal(transferLog?.includes(CUIT), false);
       assert.equal(transferLog?.includes("d1 down"), true);
+    } finally {
+      console.error = original;
+    }
+  });
+
+  it("keeps transfer internal ids when only the income statement fails", async () => {
+    const lines: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map((arg) => String(arg)).join(" "));
+    };
+    try {
+      const db = openDb();
+      seedPeople(db);
+      insertTx(db, {
+        id: "own-cfg",
+        householdId: "hh-home",
+        date: "2026-08-10",
+        description: `TRANSFERENCIA 11-${"1".repeat(8)}-1`,
+        bank: "BBVA",
+        amountArs: "5001",
+      });
+      insertTx(db, {
+        id: "income-out",
+        householdId: "hh-home",
+        date: "2026-08-10",
+        description: "PAGO SERVICIO",
+        bank: "GALICIA",
+        amountArs: "80",
+      });
+      insertIncome(db, {
+        id: "inc-twin",
+        householdId: "hh-home",
+        date: "2026-08-10",
+        label: "TRANSFERENCIA",
+        amountArs: "80",
+      });
+      const real = wrap(db);
+      const failing = {
+        prepare(sql: string) {
+          if (sql === INCOME_TWIN_SQL) {
+            return {
+              bind() {
+                return {
+                  async all() {
+                    throw new Error("income down");
+                  },
+                };
+              },
+            };
+          }
+          return real.prepare(sql);
+        },
+      };
+      const movements = await loadExcludedMovementIds(failing, "user-u", CUIT);
+      assert.equal(movements.internalIds.includes("own-cfg"), true);
+      assert.equal(movements.excludedIds.includes("own-cfg"), true);
+      assert.equal(movements.userHouseholdIds.has("hh-home"), true);
+      assert.deepEqual(movements.incomeOutgoing, []);
+      const incomeLog = lines.find((line) => line.includes("income twin load failed"));
+      assert.equal(typeof incomeLog, "string");
+      assert.equal(incomeLog?.includes("user-u"), false);
+      assert.equal(incomeLog?.includes(CUIT), false);
+      assert.equal(incomeLog?.includes("5001"), false);
+      assert.equal(incomeLog?.includes("80"), false);
+      assert.equal(incomeLog?.includes("income down"), true);
+      assert.equal(lines.some((line) => line.includes("transfer class load failed")), false);
     } finally {
       console.error = original;
     }
