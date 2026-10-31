@@ -40,6 +40,12 @@ export interface Env {
   ALLOWED_EMAILS?: string;
   /** Roommate payee tokens ("ANA+PEREZ,ANITA"). Set as a Worker secret/var, never commit. */
   REINTEGRO_PAYEES?: string;
+  /**
+   * Own-account CUITs, CBUs/CVUs, and aliases, comma-separated.
+   * Worker runtime variable only. Never commit real values. Empty = none from config.
+   * Data-derived ids (rows marked cuenta propia / cuenta tuya / own account) are added at request time.
+   */
+  OWN_ACCOUNT_IDS?: string;
   AUTH_URL?: string;
   OPENAI_API_KEY?: string;
   /** wrangler secret. Never put this in wrangler.jsonc or logs. */

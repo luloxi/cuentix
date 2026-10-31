@@ -1,17 +1,51 @@
 /**
  * Compact port of `periodIncomeEntries` + `sumPeriodIncomeArs`.
- * Variable rows whose label looks like an internal transfer, card payment,
- * or Fiwind refund are skipped with the same phrase list as
- * `isNonIncomeTransferLabel` (accent-folded). USD uses the caller buy rate.
+ *
+ * Variable rows are skipped when the label matches the old non-transfer
+ * phrase list (cuenta tuya, cambio de moneda, DEBIN, CR TBE, …), when it
+ * contains an own-account marker, or when it contains an own-account id
+ * from `OWN_ACCOUNT_IDS` plus ids derived from the user's rows.
+ *
+ * A generic TRANSFERENCIA / TRANSFERENCIA INMEDIATA with no own id, no
+ * marker, and no counterpart is income. `annotateIncomeRows` sets
+ * `revisar: true` on that payload. An outgoing transaction of the same
+ * signed amount within one day, in another account of the same user,
+ * makes the variable row internal (the twin rule). Recurring rows are not
+ * label-skipped.
  */
 
-type IncomeRow = {
+import {
+  descriptionHasOwnId,
+  hasOwnAccountMarker,
+  isUndeterminedTransfer,
+  pairIncomeInternalIds,
+  type IncomeMatchRow,
+  type TransferClassRow,
+} from "./transfer-class";
+
+export type IncomeRow = {
+  id?: string;
+  household_id?: string | null;
+  householdId?: string | null;
   date: string;
   label: string;
   kind: string | null;
   frequency: string | null;
   amount_ars: string | null;
   amount_usd: string | null;
+};
+
+export type IncomeContext = {
+  ownIds?: ReadonlySet<string>;
+  userHouseholdIds?: ReadonlySet<string>;
+  outgoing?: readonly TransferClassRow[];
+};
+
+export type AnnotatedIncome = IncomeRow & {
+  /** Dropped from the income total. */
+  internal: boolean;
+  /** Generic transfer whose origin cannot be determined. Counts as income. */
+  revisar: boolean;
 };
 
 function num(value: string | null): number {
@@ -38,7 +72,8 @@ function foldLabel(label: string): string {
     .replace(/\p{M}/gu, "");
 }
 
-function skipLabel(label: string): boolean {
+/** Phrase list for labels that are not decided by an account id. */
+function skipPhrase(label: string): boolean {
   const u = foldLabel(label);
   return (
     u.includes("CUENTA TUYA") ||
@@ -54,6 +89,43 @@ function skipLabel(label: string): boolean {
     u.includes("SU PAGO") ||
     /^DEVOLUCION\b/.test(u.trim())
   );
+}
+
+function labelInternal(label: string, ownIds: ReadonlySet<string>): boolean {
+  return skipPhrase(label) || hasOwnAccountMarker(label) || descriptionHasOwnId(label, ownIds);
+}
+
+function householdOf(row: IncomeRow): string | null {
+  return row.household_id ?? row.householdId ?? null;
+}
+
+/**
+ * Income rows with `internal` and `revisar`. This is the payload builder:
+ * a list endpoint should return these objects rather than the raw rows.
+ */
+export function annotateIncomeRows(rows: IncomeRow[], ctx?: IncomeContext): AnnotatedIncome[] {
+  const ownIds = ctx?.ownIds ?? new Set<string>();
+  const homes = ctx?.userHouseholdIds ?? new Set<string>();
+  const variable: IncomeMatchRow[] = [];
+  rows.forEach((row, index) => {
+    if (row.kind === "recurring") return;
+    const householdId = householdOf(row);
+    variable.push({
+      id: row.id ?? `idx:${index}`,
+      householdId,
+      date: row.date,
+      amountArs: row.amount_ars,
+      amountUsd: row.amount_usd,
+    });
+  });
+  const twins = pairIncomeInternalIds(variable, ctx?.outgoing ?? [], homes);
+  return rows.map((row, index) => {
+    const id = row.id ?? `idx:${index}`;
+    const variableRow = row.kind !== "recurring";
+    const internal = variableRow && (labelInternal(row.label, ownIds) || twins.has(id));
+    const revisar = !internal && isUndeterminedTransfer(row.label, ownIds);
+    return { ...row, internal, revisar };
+  });
 }
 
 function recurringDates(anchor: string, frequency: string, period: string): string[] {
@@ -84,13 +156,18 @@ function recurringDates(anchor: string, frequency: string, period: string): stri
   return out;
 }
 
-export function sumIncomeArs(rows: IncomeRow[], period: string, buyRate: number): number {
+export function sumIncomeArs(
+  rows: IncomeRow[],
+  period: string,
+  buyRate: number,
+  ctx?: IncomeContext,
+): number {
   let total = 0;
-  for (const row of rows) {
+  for (const row of annotateIncomeRows(rows, ctx)) {
     const kind = row.kind === "recurring" ? "recurring" : "variable";
     if (kind === "variable") {
       if (!row.date.startsWith(period)) continue;
-      if (skipLabel(row.label)) continue;
+      if (row.internal) continue;
       total += num(row.amount_ars);
       if (buyRate > 0) total += num(row.amount_usd) * buyRate;
       continue;
