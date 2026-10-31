@@ -1,7 +1,7 @@
 import type { Env } from "./env";
 import { loadFx, monthEndBuy } from "./fx";
 import { activeHousehold, forceSharedOnly, type HouseholdRow } from "./household";
-import { sumIncomeArs } from "./income";
+import { incomeParts, sumIncomeArs, type IncomeContext, type IncomeRow } from "./income";
 import { debtFigure } from "../src/lib/stats/debt";
 import { loadExcludedMovementIds } from "./transfer-class";
 import { ARS_EXPR, CLOSED_STATEMENT_SQL, USD_EXPR, expenseSql } from "./sql";
@@ -298,4 +298,156 @@ function visibility(household: HouseholdRow, userId: string, sharedOnly: boolean
     where: "(t.ownership = 'shared' OR t.paid_by_user_id = ?)",
     binds: [userId],
   };
+}
+
+export type MoneyBreakdown = { ars: number; usd: number; totalArs: number };
+
+export type MonthCategory = { name: string; slug: string; amount: number };
+
+export type MonthResumen = {
+  period: string;
+  fxRate: number;
+  ingresos: MoneyBreakdown;
+  gastos: MoneyBreakdown;
+  neto: MoneyBreakdown;
+  topCategories: MonthCategory[];
+};
+
+/**
+ * One row per month in `[from, to]`. Expenses use the same filter, visibility,
+ * and ARS-equivalent as the dashboard (`expenseSql` + month-end buy). Income
+ * uses `incomeParts` / `sumIncomeArs`. Top categories are the dashboard
+ * ranking with 5 rows instead of 4.
+ */
+export async function buildMonthlyResumen(
+  req: Request,
+  env: Env,
+  user: SessionUser,
+  from: string,
+  to: string,
+): Promise<
+  | Response
+  | { from: string; to: string; householdName: string; months: MonthResumen[] }
+> {
+  const { active } = await activeHousehold(req, env, user.id);
+  if (!active) return json({ error: "NO_HOUSEHOLD" }, 400);
+  const start = periodRange(from);
+  const end = periodRange(to);
+  if (!start || !end || from > to) return json({ error: "Período inválido" }, 400);
+
+  const sharedOnly = forceSharedOnly(active.name);
+  const { where, binds } = visibility(active, user.id, sharedOnly);
+  const movements = await loadExcludedMovementIds(env.DB, user.id, env.OWN_ACCOUNT_IDS);
+  const incomeCtx: IncomeContext = {
+    ownIds: movements.ownIds,
+    userHouseholdIds: movements.userHouseholdIds,
+    outgoing: movements.incomeOutgoing,
+  };
+  const [spendRes, catRes, incomes, fx] = await Promise.all([
+    env.DB.prepare(
+      `SELECT substr(t.date, 1, 7) AS month,
+              SUM(${ARS_EXPR}) AS ars,
+              SUM(${USD_EXPR}) AS usd
+       FROM transactions t
+       WHERE t.household_id = ?
+         AND t.date >= ?
+         AND t.date < ?
+         AND ${expenseSql(movements.excludedIds)}
+         AND ${where}
+       GROUP BY month`,
+    )
+      .bind(active.id, start.start, end.end, ...binds)
+      .all<{ month: string | null; ars: number | null; usd: number | null }>(),
+    env.DB.prepare(
+      `SELECT substr(t.date, 1, 7) AS month,
+              c.slug AS slug, c.name AS name,
+              SUM(${ARS_EXPR}) AS ars, SUM(${USD_EXPR}) AS usd
+       FROM transactions t
+       LEFT JOIN categories c ON c.id = t.category_id
+       WHERE t.household_id = ?
+         AND t.date >= ?
+         AND t.date < ?
+         AND ${expenseSql(movements.excludedIds)}
+         AND ${where}
+       GROUP BY month, t.category_id`,
+    )
+      .bind(active.id, start.start, end.end, ...binds)
+      .all<{
+        month: string | null;
+        slug: string | null;
+        name: string | null;
+        ars: number | null;
+        usd: number | null;
+      }>(),
+    incomeRows(env, user.id, active.id),
+    loadFx(),
+  ]);
+
+  const spendByMonth = new Map<string, { ars: number; usd: number }>();
+  for (const row of spendRes.results ?? []) {
+    if (!row.month) continue;
+    spendByMonth.set(row.month, { ars: num(row.ars), usd: num(row.usd) });
+  }
+  const catsByMonth = new Map<string, Array<{ slug: string | null; name: string | null; ars: number; usd: number }>>();
+  for (const row of catRes.results ?? []) {
+    if (!row.month) continue;
+    const list = catsByMonth.get(row.month) ?? [];
+    list.push({ slug: row.slug, name: row.name, ars: num(row.ars), usd: num(row.usd) });
+    catsByMonth.set(row.month, list);
+  }
+
+  const months: MonthResumen[] = [];
+  let cursor = from;
+  while (cursor <= to) {
+    const rate = monthEndBuy(fx, cursor);
+    const spend = spendByMonth.get(cursor) ?? { ars: 0, usd: 0 };
+    const ingresos = incomeMoney(incomes, cursor, rate, incomeCtx);
+    const gastos = money(spend.ars, spend.usd, rate);
+    months.push({
+      period: cursor,
+      fxRate: rate,
+      ingresos,
+      gastos,
+      neto: {
+        ars: ingresos.ars - gastos.ars,
+        usd: ingresos.usd - gastos.usd,
+        totalArs: ingresos.totalArs - gastos.totalArs,
+      },
+      topCategories: rankCategories(catsByMonth.get(cursor) ?? [], rate),
+    });
+    const next = shiftPeriod(cursor, 1);
+    if (next === cursor) break;
+    cursor = next;
+  }
+
+  return { from, to, householdName: active.name, months };
+}
+
+function money(ars: number, usd: number, rate: number): MoneyBreakdown {
+  return { ars, usd, totalArs: ars + (rate > 0 ? usd * rate : 0) };
+}
+
+function incomeMoney(
+  rows: IncomeRow[],
+  period: string,
+  rate: number,
+  ctx: IncomeContext,
+): MoneyBreakdown {
+  const parts = incomeParts(rows, period, rate, ctx);
+  return { ars: parts.ars, usd: parts.usd, totalArs: parts.totalArs };
+}
+
+function rankCategories(
+  rows: Array<{ slug: string | null; name: string | null; ars: number; usd: number }>,
+  rate: number,
+): MonthCategory[] {
+  return rows
+    .map((row) => ({
+      slug: row.slug ?? "uncategorized",
+      name: row.name ?? "Sin categoría",
+      amount: row.ars + (rate > 0 ? row.usd * rate : 0),
+    }))
+    .filter((row) => row.amount > 0)
+    .sort((a, b) => b.amount - a.amount || a.slug.localeCompare(b.slug))
+    .slice(0, 5);
 }

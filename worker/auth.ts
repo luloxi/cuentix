@@ -32,6 +32,8 @@ type OAuthState = {
 };
 
 /**
+ * Cookie session only. Bearer is not a session: `/api/svc/*` checks
+ * `MCP_SERVICE_TOKEN` on its own, and every other route ignores Authorization.
  * One indexed lookup: auth_session.token is UNIQUE, joined to auth_user.
  * Allowlist is enforced at login, not on this hot path.
  */

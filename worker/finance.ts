@@ -72,17 +72,21 @@ export async function handleDebtSettings(req: Request, env: Env, user: SessionUs
 
 export async function handleDebtStats(req: Request, env: Env, user: SessionUser): Promise<Response> {
   if (req.method !== "GET") return json({ error: "Método no permitido" }, 405);
+  return json(await buildDebtStats(env, user));
+}
+
+export async function buildDebtStats(env: Env, user: SessionUser) {
   const row = await debtRow(env, user.id);
   const reading = debtReading(row);
   const [statements, pastInstallments] = await Promise.all([
     closedStatements(env, user.id),
     pastCuotas(env, user.id),
   ]);
-  return json({
+  return {
     cardStatus: reading.cardStatus,
-    payments: [],
-    openInstallments: [],
-    openCharges: [],
+    payments: [] as [],
+    openInstallments: [] as [],
+    openCharges: [] as [],
     summary: {
       currentBalanceArs: reading.balanceArs,
       currentBalanceUsd: reading.balanceUsd,
@@ -101,32 +105,40 @@ export async function handleDebtStats(req: Request, env: Env, user: SessionUser)
     statements,
     pastInstallments,
     trustedMonths: TRUSTED_DEBT_MONTHS,
-  });
+  };
 }
 
 export async function handlePatrimonio(req: Request, env: Env, user: SessionUser): Promise<Response> {
   if (req.method !== "GET") return json({ error: "Método no permitido" }, 405);
-  return json(await patrimonioPayload(req, env, user.id));
+  return json(await buildPatrimonio(req, env, user));
+}
+
+export async function buildPatrimonio(req: Request, env: Env, user: SessionUser) {
+  return patrimonioPayload(req, env, user.id);
 }
 
 export async function handlePatrimonioSnapshot(req: Request, env: Env, user: SessionUser): Promise<Response> {
   if (req.method !== "POST") return json({ error: "Método no permitido" }, 405);
   const snapshot = await captureUserSnapshot(env, user.id, undefined, "force");
-  const payload = await patrimonioPayload(req, env, user.id);
+  const payload = await buildPatrimonio(req, env, user);
   return json({ ...payload, snapshot });
 }
 
 async function listAhorros(_req: Request, env: Env, user: SessionUser): Promise<Response> {
+  return json(await buildAhorros(env, user));
+}
+
+export async function buildAhorros(env: Env, user: SessionUser) {
   const rows = await savingsRows(env, user.id);
   const fx = await loadFx();
   const summary = summarize(rows, usableFxRate(fx.blue));
-  return json({
+  return {
     assets: rows.map(publicAsset),
     summary: {
       ...summary,
-      balanceNote: "Saldos guardados, sin sync en vivo.",
+      balanceNote: "Saldos guardados, sin sync en vivo." as const,
     },
-  });
+  };
 }
 
 async function createAhorro(req: Request, env: Env, user: SessionUser): Promise<Response> {

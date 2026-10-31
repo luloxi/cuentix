@@ -64,7 +64,103 @@ export async function handleTransactions(
   return json({ error: "Método no permitido" }, 405);
 }
 
+export type ServiceMovement = {
+  date: string;
+  description: string;
+  amountArs: number | null;
+  amountUsd: number | null;
+  category: string | null;
+  bank: string | null;
+  source: string;
+  isPayment: boolean;
+  ownership: "shared" | "personal";
+};
+
+/** Same listing query as Consumos, without receipts, ids, or sync fields. */
+export async function listServiceMovements(
+  req: Request,
+  env: Env,
+  user: SessionUser,
+  opts: { limit: number },
+): Promise<Response | { total: number; movements: ServiceMovement[] }> {
+  const page = await loadTransactionPage(req, env, user, { limit: opts.limit, offset: 0 });
+  if (page instanceof Response) return page;
+  return {
+    total: page.total,
+    movements: page.rows.map((row) => ({
+      date: row.date,
+      description: row.description_normalized,
+      amountArs: row.amount_ars != null ? num(row.amount_ars) : null,
+      amountUsd: row.amount_usd != null ? num(row.amount_usd) : null,
+      category: row.category_name,
+      bank: row.bank,
+      source: row.source,
+      isPayment: Boolean(row.is_payment),
+      ownership: row.ownership === "shared" ? "shared" : "personal",
+    })),
+  };
+}
+
 async function listTransactions(req: Request, env: Env, user: SessionUser): Promise<Response> {
+  const page = await loadTransactionPage(req, env, user);
+  if (page instanceof Response) return page;
+  const { active, rows, movements } = page;
+  const receipts = await receiptsFor(env, rows.map((row) => row.id));
+  const transactions = rows.map((row) => {
+    const receipt = receipts.get(row.id) ?? null;
+    const category = row.category_id
+      ? {
+          id: row.category_id,
+          slug: row.category_slug ?? "uncategorized",
+          name: row.category_name ?? "Sin categoría",
+        }
+      : null;
+    return {
+      id: row.id,
+      date: row.date,
+      descriptionNormalized: row.description_normalized,
+      amountArs: row.amount_ars != null ? num(row.amount_ars) : null,
+      amountUsd: row.amount_usd != null ? num(row.amount_usd) : null,
+      installment: row.installment,
+      isPayment: Boolean(row.is_payment),
+      ownership: row.ownership === "shared" ? "shared" : "personal",
+      paidByUserId: row.paid_by_user_id,
+      source: row.source,
+      linkedTransactionId: row.linked_transaction_id,
+      linkedToInvoiceIog: Boolean(row.linked_transaction_id) && row.source !== "invoice_iog",
+      bank: row.bank,
+      category,
+      hasTicket: Boolean(receipt) || row.source === "receipt",
+      receipt,
+      canEdit: row.ownership === "shared" || row.paid_by_user_id === user.id,
+      isBusiness: Boolean(row.is_business),
+      syncStatus: syncStatusFromOutbox(row),
+      revisar: movements.revisarIds.has(row.id),
+      ...reintegroFlags(row.description_normalized, env.REINTEGRO_PAYEES),
+    };
+  });
+
+  return json({
+    transactions,
+    total: page.total,
+    limit: page.limit,
+    offset: page.offset,
+    periods: page.periods,
+    categories: page.categories,
+    members: page.members,
+    viewerUserId: user.id,
+    iogCount: page.iogCount,
+    householdId: active.id,
+    householdName: active.name,
+  });
+}
+
+async function loadTransactionPage(
+  req: Request,
+  env: Env,
+  user: SessionUser,
+  bounds?: { limit: number; offset: number },
+) {
   const { active } = await activeHousehold(req, env, user.id);
   if (!active) return json({ error: "NO_HOUSEHOLD" }, 400);
   const url = new URL(req.url);
@@ -72,8 +168,8 @@ async function listTransactions(req: Request, env: Env, user: SessionUser): Prom
     url.searchParams.get("shared") === "1" ||
     url.searchParams.get("shared") === "true" ||
     forceSharedOnly(active.name);
-  const limit = clampInt(url.searchParams.get("limit"), 10, 1, MAX_LIMIT);
-  const offset = clampInt(url.searchParams.get("offset"), 0, 0, 100_000);
+  const limit = bounds ? bounds.limit : clampInt(url.searchParams.get("limit"), 10, 1, MAX_LIMIT);
+  const offset = bounds ? bounds.offset : clampInt(url.searchParams.get("offset"), 0, 0, 100_000);
   const movements = await loadExcludedMovementIds(env.DB, user.id, env.OWN_ACCOUNT_IDS);
   const { where, binds } = buildWhere(url, {
     householdId: active.id,
@@ -133,55 +229,18 @@ async function listTransactions(req: Request, env: Env, user: SessionUser): Prom
       .first<{ n: number }>(),
   ]);
 
-  const rows = page.results ?? [];
-  const receipts = await receiptsFor(env, rows.map((row) => row.id));
-  const transactions = rows.map((row) => {
-    const receipt = receipts.get(row.id) ?? null;
-    const category = row.category_id
-      ? {
-          id: row.category_id,
-          slug: row.category_slug ?? "uncategorized",
-          name: row.category_name ?? "Sin categoría",
-        }
-      : null;
-    return {
-      id: row.id,
-      date: row.date,
-      descriptionNormalized: row.description_normalized,
-      amountArs: row.amount_ars != null ? num(row.amount_ars) : null,
-      amountUsd: row.amount_usd != null ? num(row.amount_usd) : null,
-      installment: row.installment,
-      isPayment: Boolean(row.is_payment),
-      ownership: row.ownership === "shared" ? "shared" : "personal",
-      paidByUserId: row.paid_by_user_id,
-      source: row.source,
-      linkedTransactionId: row.linked_transaction_id,
-      linkedToInvoiceIog: Boolean(row.linked_transaction_id) && row.source !== "invoice_iog",
-      bank: row.bank,
-      category,
-      hasTicket: Boolean(receipt) || row.source === "receipt",
-      receipt,
-      canEdit: row.ownership === "shared" || row.paid_by_user_id === user.id,
-      isBusiness: Boolean(row.is_business),
-      syncStatus: syncStatusFromOutbox(row),
-      revisar: movements.revisarIds.has(row.id),
-      ...reintegroFlags(row.description_normalized, env.REINTEGRO_PAYEES),
-    };
-  });
-
-  return json({
-    transactions,
+  return {
+    active,
+    rows: page.results ?? [],
     total: num(countRow?.n),
     limit,
     offset,
+    movements,
     periods: (periods.results ?? []).map((row) => row.period).filter(Boolean),
     categories,
     members,
-    viewerUserId: user.id,
     iogCount: num(iogRow?.n),
-    householdId: active.id,
-    householdName: active.name,
-  });
+  };
 }
 
 function buildWhere(

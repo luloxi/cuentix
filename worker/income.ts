@@ -162,27 +162,47 @@ function recurringDates(anchor: string, frequency: string, period: string): stri
   return out;
 }
 
+export type IncomeParts = { ars: number; usd: number; totalArs: number };
+
+/**
+ * ARS, USD, and the ARS equivalent for one month.
+ * `totalArs` is added per row, same as the previous `sumIncomeArs` loop.
+ */
+export function incomeParts(
+  rows: IncomeRow[],
+  period: string,
+  buyRate: number,
+  ctx?: IncomeContext,
+): IncomeParts {
+  let ars = 0;
+  let usd = 0;
+  let totalArs = 0;
+  for (const row of annotateIncomeRows(rows, ctx)) {
+    const kind = row.kind === "recurring" ? "recurring" : "variable";
+    let times = 0;
+    if (kind === "variable") {
+      if (!row.date.startsWith(period)) continue;
+      if (row.internal) continue;
+      times = 1;
+    } else {
+      times = recurringDates(row.date, row.frequency ?? "", period).length;
+      if (times === 0) continue;
+    }
+    const rowArs = times * num(row.amount_ars);
+    const rowUsd = times * num(row.amount_usd);
+    ars += rowArs;
+    usd += rowUsd;
+    totalArs += rowArs;
+    if (buyRate > 0) totalArs += rowUsd * buyRate;
+  }
+  return { ars, usd, totalArs };
+}
+
 export function sumIncomeArs(
   rows: IncomeRow[],
   period: string,
   buyRate: number,
   ctx?: IncomeContext,
 ): number {
-  let total = 0;
-  for (const row of annotateIncomeRows(rows, ctx)) {
-    const kind = row.kind === "recurring" ? "recurring" : "variable";
-    if (kind === "variable") {
-      if (!row.date.startsWith(period)) continue;
-      if (row.internal) continue;
-      total += num(row.amount_ars);
-      if (buyRate > 0) total += num(row.amount_usd) * buyRate;
-      continue;
-    }
-    const frequency = row.frequency ?? "";
-    const dates = recurringDates(row.date, frequency, period);
-    if (dates.length === 0) continue;
-    total += dates.length * num(row.amount_ars);
-    if (buyRate > 0) total += dates.length * num(row.amount_usd) * buyRate;
-  }
-  return total;
+  return incomeParts(rows, period, buyRate, ctx).totalArs;
 }

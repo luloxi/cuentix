@@ -50,6 +50,16 @@ export interface Env {
   OPENAI_API_KEY?: string;
   /** wrangler secret. Never put this in wrangler.jsonc or logs. */
   CUENTIX_SYNC_SECRET?: string;
+  /**
+   * wrangler secret for the read-only `/api/svc/*` API.
+   * Never put the value in wrangler.jsonc, git, or logs.
+   */
+  MCP_SERVICE_TOKEN?: string;
+  /**
+   * `auth_user.email` the service acts as. When unset, the admin email is used.
+   * Not a secret. Never changes who a cookie session is.
+   */
+  MCP_SERVICE_USER_EMAIL?: string;
   /** Override in tests. Prod sets it in wrangler vars. */
   SERPIX_SYNC_URL?: string;
 }

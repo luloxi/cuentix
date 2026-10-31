@@ -172,3 +172,43 @@ Si el PDF no matchea el parser BBVA y está `OPENAI_API_KEY`, el import usa IA (
 ## Privacidad
 
 Cuando conectás una IA por MCP, los movimientos salen de Cuentix hacia esa IA. No pegues el token del hogar en chats ni en el repo. Polar/suscripción no se toca con este cambio.
+
+## API de servicio (solo lectura)
+
+Un Worker aparte (por ejemplo `lulox-mcp`, allowlist de una sola persona) puede leer los datos de ese usuario por HTTP. Sirve igual por HTTPS o por un service binding de Cloudflare: es un `fetch` común. No usa la cookie de la PWA ni el token del hogar. La cookie sigue siendo la única auth de `/api/dashboard` y del resto de la PWA. El bearer de este secreto no autentica esas rutas.
+
+Solo `GET`. Cualquier otro método en `/api/svc/*` responde `405`.
+
+| Name | Required | Purpose |
+| --- | --- | --- |
+| `MCP_SERVICE_TOKEN` | sí | Secreto del Worker. Header `Authorization: Bearer <MCP_SERVICE_TOKEN>`. |
+| `MCP_SERVICE_USER_EMAIL` | no | Email de `auth_user` al que actúa el servicio. Si falta, el email admin. |
+
+```bash
+wrangler secret put MCP_SERVICE_TOKEN
+```
+
+No commitees el valor. Si el secreto no está configurado, o el token falta o no coincide, la respuesta es `401` `{ "error": "No autenticado" }` sin decir cuál de los tres fue.
+
+El servicio usa el hogar activo de ese usuario, con la misma regla que la PWA (cookie `lc_household` si viene, si no Personal / Mi espacio). Los números salen de las mismas funciones que el dashboard, la deuda, los ahorros, el patrimonio y el listado de movimientos.
+
+| Método | Ruta | Qué devuelve |
+| --- | --- | --- |
+| GET | `/api/svc/resumen-mensual?from=YYYY-MM&to=YYYY-MM` | Por mes: ingresos y gastos en ARS, USD y total en pesos (gastos sin transferencias internas ni ecos, igual que el dashboard), neto y top 5 categorías. Default: últimos 6 meses, incluido el actual. Máximo 24. |
+| GET | `/api/svc/deuda-ahorro-patrimonio` | Deuda (el `summary` de `/api/stats/deuda`), ahorros (el `summary` de `/api/ahorros`: ARS, USD, wallets y neto) y patrimonio (lo que devuelve `/api/patrimonio`, con la serie, `note`, `trustedMonths` y `changes` contra el mes anterior y el primer punto del año cuando hay datos). |
+| GET | `/api/svc/ultimos-movimientos?limit=20` | Últimos movimientos del listado de Consumos. `limit` de 1 a 50 (default 20). `period=YYYY-MM` y `q` opcionales. Fecha, descripción, montos, categoría, banco, origen, pago y ownership. Sin tickets ni ids internos. |
+
+`period` inválido, rango invertido o más de 24 meses: `400`.
+
+```bash
+curl -sS -H "Authorization: Bearer $MCP_SERVICE_TOKEN" \
+  "$APP_URL/api/svc/resumen-mensual?from=2026-05&to=2026-10"
+
+curl -sS -H "Authorization: Bearer $MCP_SERVICE_TOKEN" \
+  "$APP_URL/api/svc/deuda-ahorro-patrimonio"
+
+curl -sS -H "Authorization: Bearer $MCP_SERVICE_TOKEN" \
+  "$APP_URL/api/svc/ultimos-movimientos?limit=20"
+```
+
+`$MCP_SERVICE_TOKEN` es un placeholder. No pegues el secreto en el repo, en un chat ni en el cliente MCP del navegador.

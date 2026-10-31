@@ -19,6 +19,7 @@ import {
 import { json, notPorted } from "./http";
 import { handleHouseholdActive, handleMe } from "./household-routes";
 import { flushOutbox } from "./serpix-sync";
+import { handleSvc } from "./svc";
 import { handleTransactions } from "./transactions";
 
 const worker = {
@@ -34,6 +35,9 @@ const worker = {
       }
       if (path === "/api/auth/logout" && req.method === "POST") {
         return await handleLogout(req, env);
+      }
+      if (path === "/api/svc" || path.startsWith("/api/svc/")) {
+        return await handleSvc(req, env);
       }
       if (!path.startsWith("/api/")) {
         if (path.startsWith("/.well-known/")) return json({ error: "No encontrado" }, 404);

@@ -156,6 +156,74 @@ export function historyNote(firstDate: string | null): string {
   return `El historial arranca el ${day}/${month}/${year}. Un punto por día.`;
 }
 
+export type NetWorthChange = {
+  date: string;
+  netWorthArs: number;
+  deltaArs: number;
+};
+
+/**
+ * Live net worth versus stored points.
+ * Previous month: the latest point in the previous calendar month.
+ * Year start: the earliest point on or after 1 January of the current year,
+ * strictly before `currentDate`. Missing data is null. A null live net is null.
+ */
+export function netWorthDeltas(
+  currentDate: string,
+  currentNet: number | null,
+  series: readonly PatrimonioPoint[],
+): { vsPreviousMonth: NetWorthChange | null; vsYearStart: NetWorthChange | null } {
+  if (currentNet == null || !Number.isFinite(currentNet)) {
+    return { vsPreviousMonth: null, vsYearStart: null };
+  }
+  const month = currentDate.slice(0, 7);
+  const prevMonth = shiftMonth(month, -1);
+  const year = currentDate.slice(0, 4);
+  return {
+    vsPreviousMonth: toChange(currentNet, latestInMonth(series, prevMonth)),
+    vsYearStart: toChange(currentNet, earliestBetween(series, `${year}-01-01`, currentDate)),
+  };
+}
+
+function toChange(currentNet: number, point: PatrimonioPoint | null): NetWorthChange | null {
+  if (!point) return null;
+  return {
+    date: point.date,
+    netWorthArs: point.netWorthArs,
+    deltaArs: currentNet - point.netWorthArs,
+  };
+}
+
+function latestInMonth(series: readonly PatrimonioPoint[], month: string): PatrimonioPoint | null {
+  let best: PatrimonioPoint | null = null;
+  for (const point of series) {
+    if (!point.date.startsWith(`${month}-`)) continue;
+    if (!best || point.date > best.date) best = point;
+  }
+  return best;
+}
+
+/** Earliest point with `start <= date < before`. */
+function earliestBetween(
+  series: readonly PatrimonioPoint[],
+  start: string,
+  before: string,
+): PatrimonioPoint | null {
+  let best: PatrimonioPoint | null = null;
+  for (const point of series) {
+    if (point.date < start || point.date >= before) continue;
+    if (!best || point.date < best.date) best = point;
+  }
+  return best;
+}
+
+function shiftMonth(period: string, delta: number): string {
+  const [year, month] = period.split("-").map(Number);
+  if (!year || !month) return period;
+  const date = new Date(Date.UTC(year, month - 1 + delta, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 function finite(value: number | null | undefined): number {
   return value != null && Number.isFinite(value) ? value : 0;
 }

@@ -7,6 +7,7 @@ import {
   historyNote,
   historyStartsAt,
   netWorthArs,
+  netWorthDeltas,
   pricedNetWorth,
   readDebt,
   usableFxRate,
@@ -175,5 +176,29 @@ describe("patrimonio series", () => {
     const only = [point("2026-10-31", 100, 0)];
     assert.equal(filterPatrimonioSeries(only, "all", "2026-10-31").length, 1);
     assert.match(historyNote(historyStartsAt(only)), /31\/10\/2026/);
+  });
+
+  it("deltas use the latest previous month and the first point of the year", () => {
+    const series = [
+      point("2025-12-20", 100, 0),
+      point("2026-01-01", 200, 0),
+      point("2026-09-02", 300, 0),
+      point("2026-09-28", 400, 0),
+      point("2026-10-31", 900, 0),
+    ];
+    const got = netWorthDeltas("2026-10-31", 522500, series);
+    assert.equal(got.vsPreviousMonth?.date, "2026-09-28");
+    assert.equal(got.vsPreviousMonth?.netWorthArs, 400);
+    assert.equal(got.vsPreviousMonth?.deltaArs, 522500 - 400);
+    assert.equal(got.vsYearStart?.date, "2026-01-01");
+    assert.equal(got.vsYearStart?.netWorthArs, 200);
+    assert.equal(got.vsYearStart?.deltaArs, 522500 - 200);
+    assert.deepEqual(netWorthDeltas("2026-10-31", null, series), {
+      vsPreviousMonth: null,
+      vsYearStart: null,
+    });
+    const onlyToday = [point("2026-01-01", 10, 0)];
+    assert.equal(netWorthDeltas("2026-01-01", 10, onlyToday).vsYearStart, null);
+    assert.equal(netWorthDeltas("2026-01-01", 10, onlyToday).vsPreviousMonth, null);
   });
 });
