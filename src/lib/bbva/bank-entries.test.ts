@@ -118,6 +118,9 @@ describe("isBankAccountingEntry internal transfers", () => {
     assert.equal(isBankAccountingEntry("TRANSFERENCIA A JUAN PEREZ"), false);
     assert.equal(isOwnAccountTransferDescription("Pago a DIA"), false);
     assert.equal(isNonIncomeTransferLabel("Mauro Agustin Andreoli"), false);
+    assert.equal(isNonIncomeTransferLabel("Devolución de MERPAGO*TEMBICI"), true);
+    assert.equal(isBankAccountingEntry("TRANSF CREDITO Nro:215857"), true);
+    assert.equal(isNonIncomeTransferLabel("TRANSF CREDITO Nro:215857"), true);
     assert.equal(
       isInternalTransferDescription("Transferencia de Mauro Agustin Andreoli"),
       false,

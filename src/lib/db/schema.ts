@@ -172,6 +172,10 @@ export const cardStatements = sqliteTable("card_statements", {
   importedBy: text("imported_by").references(() => users.id),
   importedAt: tsNow("imported_at"),
   rowCount: integer("row_count").notNull().default(0),
+  /** Null while the import can still feed active card debt. */
+  closedAt: ts("closed_at"),
+  /** open | closed. Closed rows stay as history. */
+  status: text("status").notNull().default("open"),
 });
 
 export const transactions = sqliteTable(

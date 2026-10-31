@@ -518,6 +518,44 @@ describe("computeCardDebt — no millions", () => {
   });
 });
 
+describe("closed card and bank credits", () => {
+  it("does not treat TRANSF CREDITO or a closed statement as open card debt", () => {
+    const base: DebtTx = {
+      id: "c1",
+      date: "2026-09-19",
+      descriptionNormalized: "TRANSF CREDITO Nro:215857",
+      amountArs: "6500",
+      amountUsd: null,
+      isPayment: false,
+      isCredit: false,
+      ownership: "personal",
+      paidByUserId: "user-1",
+      source: "xlsx_import",
+      bank: "BBVA",
+    };
+    const open = computeCardDebt([base], {
+      userId: "user-1",
+      settings: { saldoDeudaArs: 0, saldoDeudaUsd: 0 },
+    });
+    assert.equal(open.openCharges.length, 0);
+    assert.equal(open.currentBalanceArs, 0);
+    assert.equal(open.settled, true);
+
+    const closedCharge: DebtTx = {
+      ...base,
+      id: "c2",
+      descriptionNormalized: "TEMBICI",
+      statementClosed: true,
+    };
+    const closed = computeCardDebt([closedCharge], {
+      userId: "user-1",
+      settings: { saldoDeudaArs: null, saldoDeudaUsd: null },
+    });
+    assert.equal(closed.openCharges.length, 0);
+    assert.equal(closed.mode, "empty");
+  });
+});
+
 describe("strict dedupe", () => {
   it("re-reading the same period file yields the same logical keys", () => {
     const a = parseStatementWorkbook(buf("mov-periodo-a.xls"), "mov-periodo-a.xls");

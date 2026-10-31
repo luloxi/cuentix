@@ -67,9 +67,11 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
     .sort((a, b) => b.total - a.total)
     .slice(0, 4);
 
-  const savingsUsd = savings.usd + savings.usdc;
+  // Bank USD and wallet balances are separate lines. Net adds them once.
+  const savingsUsd = savings.usd;
   const blue = fx.blue;
-  const savingsNetArs = savings.ars + (blue != null && blue > 0 ? savingsUsd * blue : 0);
+  const savingsFxUsd = savings.usd + savings.usdc;
+  const savingsNetArs = savings.ars + (blue != null && blue > 0 ? savingsFxUsd * blue : 0);
   const incomeArs = sumIncomeArs(incomes, period, rateNow);
   const firstName = (user.name || user.email || "").split(/\s+/)[0] || "vos";
 

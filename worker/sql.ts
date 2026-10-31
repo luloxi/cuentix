@@ -8,33 +8,144 @@
  * - not a payment, not a credit
  * - not a period-xls / resumen-pdf source (bbva_period, bbva_pdf)
  * - Casita rows linked to Invoice IOG are excluded; invoice_iog itself counts
- * - a fixed LIKE list covers the common bank-accounting phrases
- *   (cuenta tuya, cambio de moneda, pesificación, transf deuda, compra/venta KO).
- *   The full JS classifier (`isBankAccountingEntry`) is not run per row.
+ * - `BANK_ACCOUNTING_SQL` covers the phrases `isBankAccountingEntry` /
+ *   Fiwind tipos use: cuenta tuya, cambio de moneda, pesificación, transf
+ *   deuda, compra/venta KO, amount-only tipos, RETIRO, DEPOSITO, CONVERSION,
+ *   yields, and wallet TRANSFERENCIA ARS.
+ *   The full JS classifier is not run per row.
  *
- * Consumos visibility approximates `isConsumosHiddenPayment`: card payments
- * stay hidden unless the category is transferencia-interna / a hogar utility,
- * or the description matches the reintegro and internal-transfer phrases.
+ * Consumos shows real spends plus internal transfers and the payment
+ * exceptions in `isConsumosHiddenPayment`. Other bank-accounting lines
+ * (numeric Fiwind tipos, pesificación, Retiro) stay out of the list, matching
+ * `listTransactions` in src/lib/transactions.ts.
  */
+
+/** True when the description is bank accounting (not a household spend). */
+export const BANK_ACCOUNTING_SQL = `(
+  upper(t.description_normalized) LIKE '%CAMBIO DE MONEDA%'
+  OR upper(t.description_normalized) LIKE '%CAMBIO MONEDA%'
+  OR upper(t.description_normalized) LIKE '%CUENTA TUYA%'
+  OR upper(t.description_normalized) LIKE '%CUENTA PROPIA%'
+  OR upper(t.description_normalized) LIKE '%ENTRE CUENTAS%'
+  OR upper(t.description_normalized) LIKE '%PESIFICACION%'
+  OR upper(t.description_normalized) LIKE '%PESIFICACIÓN%'
+  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA DEUDA%'
+  OR upper(t.description_normalized) LIKE '%TRANSF%DEUDA%'
+  OR upper(t.description_normalized) LIKE '%CREDITOS VS EN USD%'
+  OR upper(t.description_normalized) LIKE '%CREDITO VS EN USD%'
+  OR upper(t.description_normalized) LIKE '%COMPRA KO%'
+  OR upper(t.description_normalized) LIKE '%VENTA KO%'
+  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA INMEDIATA%'
+  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA INTERNA%'
+  OR upper(t.description_normalized) LIKE '%CUENTA A CUENTA%'
+  OR upper(t.description_normalized) LIKE '%CTA A CTA%'
+  OR upper(t.description_normalized) LIKE '%CR TRF%'
+  OR upper(t.description_normalized) LIKE '%CR TBE%'
+  OR upper(t.description_normalized) LIKE '%INM COE%'
+  OR upper(t.description_normalized) LIKE '%TRANSF CREDITO%'
+  OR upper(t.description_normalized) LIKE '%TRANSF. CREDITO%'
+  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA CREDITO%'
+  OR upper(t.description_normalized) LIKE '%OPERACION DE CAMBIO%'
+  OR upper(t.description_normalized) LIKE '%OPERACIONES DE CAMBIO%'
+  OR upper(t.description_normalized) LIKE '%OPERACION CAMBIO%'
+  OR upper(t.description_normalized) LIKE '%OPERACIONES CAMBIO%'
+  OR upper(trim(t.description_normalized)) GLOB 'COMPRA ME'
+  OR upper(trim(t.description_normalized)) GLOB 'COMPRA ME *'
+  OR upper(trim(t.description_normalized)) GLOB '* COMPRA ME'
+  OR upper(trim(t.description_normalized)) GLOB '* COMPRA ME *'
+  OR upper(trim(t.description_normalized)) GLOB 'VENTA ME'
+  OR upper(trim(t.description_normalized)) GLOB 'VENTA ME *'
+  OR upper(trim(t.description_normalized)) GLOB '* VENTA ME'
+  OR upper(trim(t.description_normalized)) GLOB '* VENTA ME *'
+  OR upper(trim(t.description_normalized)) = 'RETIRO'
+  OR upper(trim(t.description_normalized)) GLOB 'DEPOSITO'
+  OR upper(trim(t.description_normalized)) GLOB 'DEPOSITO *'
+  OR upper(trim(t.description_normalized)) GLOB 'CONVERSION*'
+  OR upper(trim(t.description_normalized)) GLOB 'GANANCIA*'
+  OR upper(trim(t.description_normalized)) GLOB 'RENDIMIENTO*'
+  OR upper(trim(t.description_normalized)) = 'TRANSFERENCIA'
+  OR (
+    upper(trim(t.description_normalized)) GLOB 'TRANSFERENCIA [A-Z0-9.]*'
+    AND instr(substr(upper(trim(t.description_normalized)), 15), ' ') = 0
+    AND length(substr(upper(trim(t.description_normalized)), 15)) BETWEEN 2 AND 10
+  )
+  OR (
+    (
+      upper(trim(t.description_normalized)) GLOB 'COMPRA [A-Z0-9.]*'
+      OR upper(trim(t.description_normalized)) GLOB 'VENTA [A-Z0-9.]*'
+    )
+    AND instr(substr(upper(trim(t.description_normalized)), 8), ' ') = 0
+    AND length(
+      substr(
+        upper(trim(t.description_normalized)),
+        instr(upper(trim(t.description_normalized)), ' ') + 1
+      )
+    ) BETWEEN 1 AND 10
+    AND upper(trim(t.description_normalized)) NOT GLOB 'COMPRA SUPER*'
+    AND upper(trim(t.description_normalized)) NOT GLOB 'VENTA SUPER*'
+  )
+  OR (
+    upper(trim(t.description_normalized)) GLOB '[0-9]*'
+    AND upper(trim(t.description_normalized)) NOT GLOB '*[^0-9.]*'
+  )
+)`;
+
+/**
+ * Internal transfers stay on the Consumos list (out of the expense total).
+ * Requires the categories join (`c`).
+ */
+export const INTERNAL_VISIBLE_SQL = `(
+  IFNULL(c.slug, '') = 'transferencia-interna'
+  OR upper(t.description_normalized) LIKE '%CUENTA TUYA%'
+  OR upper(t.description_normalized) LIKE '%CUENTA PROPIA%'
+  OR upper(t.description_normalized) LIKE '%ENTRE CUENTAS%'
+  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA INMEDIATA%'
+  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA INTERNA%'
+  OR upper(t.description_normalized) LIKE '%CUENTA A CUENTA%'
+  OR upper(t.description_normalized) LIKE '%CTA A CTA%'
+  OR upper(t.description_normalized) LIKE '%CR TRF%'
+  OR upper(t.description_normalized) LIKE '%CR TBE%'
+  OR upper(t.description_normalized) LIKE '%INM COE%'
+  OR upper(t.description_normalized) LIKE '%TRANSF CREDITO%'
+  OR upper(t.description_normalized) LIKE '%TRANSF. CREDITO%'
+  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA CREDITO%'
+  OR upper(t.description_normalized) LIKE '%CAMBIO DE MONEDA%'
+  OR upper(t.description_normalized) LIKE '%CAMBIO MONEDA%'
+  OR upper(t.description_normalized) LIKE '%OPERACION DE CAMBIO%'
+  OR upper(t.description_normalized) LIKE '%OPERACIONES DE CAMBIO%'
+  OR upper(t.description_normalized) LIKE '%OPERACION CAMBIO%'
+  OR upper(t.description_normalized) LIKE '%OPERACIONES CAMBIO%'
+  OR upper(trim(t.description_normalized)) GLOB 'COMPRA ME'
+  OR upper(trim(t.description_normalized)) GLOB 'COMPRA ME *'
+  OR upper(trim(t.description_normalized)) GLOB '* COMPRA ME'
+  OR upper(trim(t.description_normalized)) GLOB '* COMPRA ME *'
+  OR upper(trim(t.description_normalized)) GLOB 'VENTA ME'
+  OR upper(trim(t.description_normalized)) GLOB 'VENTA ME *'
+  OR upper(trim(t.description_normalized)) GLOB '* VENTA ME'
+  OR upper(trim(t.description_normalized)) GLOB '* VENTA ME *'
+  OR upper(trim(t.description_normalized)) = 'TRANSFERENCIA'
+  OR (
+    upper(t.description_normalized) LIKE '%TRANSF%CLIENTE%'
+    AND (
+      upper(t.description_normalized) LIKE '%CTA%'
+      OR upper(t.description_normalized) LIKE '%CAP%'
+    )
+  )
+  OR (
+    upper(t.description_normalized) LIKE '%BBNK%'
+    AND (
+      upper(t.description_normalized) LIKE '%TRANSFERENCIA%'
+      OR upper(t.description_normalized) LIKE '%TRANSF %'
+    )
+  )
+)`;
 
 export const EXPENSE_SQL = `
   t.is_payment = 0
   AND t.is_credit = 0
   AND IFNULL(t.source, '') NOT IN ('bbva_period', 'bbva_pdf')
   AND (t.linked_transaction_id IS NULL OR t.source = 'invoice_iog')
-  AND upper(t.description_normalized) NOT LIKE '%CAMBIO DE MONEDA%'
-  AND upper(t.description_normalized) NOT LIKE '%CAMBIO MONEDA%'
-  AND upper(t.description_normalized) NOT LIKE '%CUENTA TUYA%'
-  AND upper(t.description_normalized) NOT LIKE '%CUENTA PROPIA%'
-  AND upper(t.description_normalized) NOT LIKE '%ENTRE CUENTAS%'
-  AND upper(t.description_normalized) NOT LIKE '%PESIFICACION%'
-  AND upper(t.description_normalized) NOT LIKE '%PESIFICACIÓN%'
-  AND upper(t.description_normalized) NOT LIKE '%TRANSFERENCIA DEUDA%'
-  AND upper(t.description_normalized) NOT LIKE '%TRANSF%DEUDA%'
-  AND upper(t.description_normalized) NOT LIKE '%CREDITOS VS EN USD%'
-  AND upper(t.description_normalized) NOT LIKE '%CREDITO VS EN USD%'
-  AND upper(t.description_normalized) NOT LIKE '%COMPRA KO%'
-  AND upper(t.description_normalized) NOT LIKE '%VENTA KO%'
+  AND NOT ${BANK_ACCOUNTING_SQL}
 `;
 
 export const ARS_EXPR = `
@@ -91,4 +202,8 @@ const CONSUMOS_VISIBLE_SQL = `
     OR upper(t.description_normalized) LIKE '%INM COE%'
   )
   AND IFNULL(t.source, '') NOT IN ('bbva_period', 'bbva_pdf')
+  AND (
+    ${INTERNAL_VISIBLE_SQL}
+    OR NOT ${BANK_ACCOUNTING_SQL}
+  )
 `;

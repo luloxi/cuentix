@@ -1,8 +1,8 @@
 /**
  * Compact port of `periodIncomeEntries` + `sumPeriodIncomeArs`.
- * Variable rows whose label looks like an internal transfer / card payment
- * are skipped with a short phrase list (subset of `isNonIncomeTransferLabel`).
- * USD is converted with the caller-supplied buy rate.
+ * Variable rows whose label looks like an internal transfer, card payment,
+ * or Fiwind refund are skipped with the same phrase list as
+ * `isNonIncomeTransferLabel` (accent-folded). USD uses the caller buy rate.
  */
 
 type IncomeRow = {
@@ -31,8 +31,15 @@ function addDays(ymd: string, days: number): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
+function foldLabel(label: string): string {
+  return label
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+}
+
 function skipLabel(label: string): boolean {
-  const u = label.toUpperCase();
+  const u = foldLabel(label);
   return (
     u.includes("CUENTA TUYA") ||
     u.includes("CUENTA PROPIA") ||
@@ -44,7 +51,8 @@ function skipLabel(label: string): boolean {
     u.includes("INM COE") ||
     u.includes("PAGO VISA") ||
     u.includes("PAGO MASTER") ||
-    u.includes("SU PAGO")
+    u.includes("SU PAGO") ||
+    /^DEVOLUCION\b/.test(u.trim())
   );
 }
 

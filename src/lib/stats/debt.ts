@@ -37,6 +37,8 @@ export type DebtTx = {
   bank?: string | null;
   cardLast4?: string | null;
   statementId?: string | null;
+  /** Statement marked closed. Kept in history, dropped from active debt. */
+  statementClosed?: boolean | null;
 };
 
 export type DebtSettingsInput = {
@@ -190,6 +192,7 @@ function toArs(
 }
 
 function isChargeRow(r: DebtTx): boolean {
+  if (r.statementClosed) return false;
   if (r.isPayment || r.isCredit) return false;
   if (isCardPaymentEntry(r.descriptionNormalized)) return false;
   if (isBankAccountingEntry(r.descriptionNormalized)) return false;
@@ -278,6 +281,7 @@ export function isSnapshotDebtRow(r: { source?: string | null }): boolean {
  */
 export function isCardSnapshotActivity(r: DebtTx): boolean {
   const desc = r.descriptionNormalized ?? "";
+  if (r.statementClosed) return false;
   if (isCardPaymentEntry(desc)) return true;
   if (isInternalTransferDescription(desc)) return false;
   if (isBankAccountingEntry(desc)) return false;
@@ -404,6 +408,7 @@ export function computeCardDebt(
 
   const mine = rows.filter(
     (r) =>
+      !r.statementClosed &&
       isPrivateToUser(r, opts.userId) &&
       isBbvaCardDebtRow(r) &&
       r.ownership !== "shared",

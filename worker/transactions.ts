@@ -1,4 +1,11 @@
 import { normalizeBank } from "../src/lib/banks";
+import {
+  expenseAmountText,
+  isCalendarDate,
+  manualFingerprintMaterial,
+  parseExpenseAmount,
+} from "../src/lib/manual-expense";
+import { queryMatchesBbvaInternalTransferTokens } from "../src/lib/bbva/search-tokens";
 import type { SessionUser } from "./auth";
 import { listVisibleCategories } from "./categories";
 import type { Env, WorkerContext } from "./env";
@@ -220,6 +227,12 @@ function buildWhere(
     const needle = `%${q.toUpperCase().replaceAll("%", "").replaceAll("_", "")}%`;
     const onlyDigits = digitsOf(q);
     const ors = [`upper(t.description_normalized) LIKE ${ph(needle)}`];
+    if (queryMatchesBbvaInternalTransferTokens(q)) {
+      ors.push(`IFNULL(c.slug, '') = 'transferencia-interna'`);
+      ors.push(`upper(t.description_normalized) LIKE '%CUENTA TUYA%'`);
+      ors.push(`upper(t.description_normalized) LIKE '%CUENTA PROPIA%'`);
+      ors.push(`upper(t.description_normalized) LIKE '%TRANSFERENCIA INMEDIATA%'`);
+    }
     if (onlyDigits) {
       const digitNeedle = `%${onlyDigits}%`;
       ors.push(
@@ -336,15 +349,22 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
   } | null;
   if (!body) return json({ error: "JSON inválido" }, 400);
   const date = (body.date ?? "").trim();
-  const description = (body.description ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  const description = (body.description ?? "").trim().replace(/\s+/g, " ");
+  if (!isCalendarDate(date)) {
     return json({ error: "Fecha inválida (YYYY-MM-DD)" }, 400);
   }
-  if (!description) return json({ error: "Falta la descripción" }, 400);
+  if (!description || description.length > 180) {
+    return json({ error: "Falta la descripción" }, 400);
+  }
 
   const items = Array.isArray(body.items) ? body.items.filter((item) => item?.name?.trim()) : [];
-  let amountArs = body.amountArs != null && body.amountArs !== "" ? Math.abs(Number(body.amountArs)) : null;
-  if (amountArs != null && Number.isNaN(amountArs)) amountArs = null;
+  const parsedArs = parseExpenseAmount(body.amountArs);
+  const parsedUsd = parseExpenseAmount(body.amountUsd);
+  if (!parsedArs.ok || !parsedUsd.ok) {
+    return json({ error: "Monto inválido" }, 400);
+  }
+  let amountArs = parsedArs.amount;
+  const amountUsd = parsedUsd.amount;
   if (items.length > 0 && (amountArs == null || amountArs === 0)) {
     const sum = items.reduce((acc, item) => {
       const line = item.lineTotal != null
@@ -356,8 +376,7 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
     }, 0);
     if (sum > 0) amountArs = sum;
   }
-  const amountUsd = body.amountUsd != null && body.amountUsd !== "" ? Math.abs(Number(body.amountUsd)) : null;
-  if (amountArs == null && (amountUsd == null || Number.isNaN(amountUsd))) {
+  if ((amountArs == null || amountArs === 0) && (amountUsd == null || amountUsd === 0)) {
     return json({ error: "Indicá un monto en $ o USD" }, 400);
   }
 
@@ -367,8 +386,12 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
     : user.id;
   let categoryId = body.categoryId ?? null;
   if (categoryId) {
-    const cat = await env.DB.prepare("SELECT id FROM categories WHERE id = ? LIMIT 1")
-      .bind(categoryId)
+    const cat = await env.DB.prepare(
+      `SELECT id FROM categories
+       WHERE id = ? AND (household_id IS NULL OR household_id = ?)
+       LIMIT 1`,
+    )
+      .bind(categoryId, active.id)
       .first<{ id: string }>();
     if (!cat) categoryId = null;
   }
@@ -377,40 +400,54 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
   }
   if (!categoryId) categoryId = await categoryIdBySlug(env, "uncategorized");
 
+  const amountArsText = expenseAmountText(amountArs);
+  const amountUsdText = expenseAmountText(amountUsd);
   const fingerprint = (await sha256Hex(
-    `manual|${date}|${description}|${amountArs ?? ""}|${amountUsd ?? ""}|${Date.now()}|${crypto.randomUUID()}`,
+    manualFingerprintMaterial({
+      householdId: active.id,
+      date,
+      description,
+      amountArs: amountArsText,
+      amountUsd: amountUsdText,
+    }),
   )).slice(0, 32);
   const txId = crypto.randomUUID();
   const now = Date.now();
-  const amountArsText = amountArs != null ? String(amountArs) : null;
-  const amountUsdText = amountUsd != null && !Number.isNaN(amountUsd) ? String(amountUsd) : null;
   const ownership = body.ownership === "shared" ? "shared" : "personal";
   const source = items.length > 0 ? "receipt" : "manual";
-  await env.DB.prepare(
-    `INSERT INTO transactions (
-       id, household_id, date, description_raw, description_normalized,
-       amount_ars, amount_usd, category_id, ownership, paid_by_user_id,
-       external_fingerprint, source, bank, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      txId,
-      active.id,
-      date,
-      description,
-      description,
-      amountArsText,
-      amountUsdText,
-      categoryId,
-      ownership,
-      paidBy,
-      fingerprint,
-      source,
-      normalizeBank(body.bank),
-      now,
-      now,
+  try {
+    await env.DB.prepare(
+      `INSERT INTO transactions (
+         id, household_id, date, description_raw, description_normalized,
+         amount_ars, amount_usd, category_id, ownership, paid_by_user_id,
+         external_fingerprint, source, bank, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run();
+      .bind(
+        txId,
+        active.id,
+        date,
+        description,
+        description,
+        amountArsText,
+        amountUsdText,
+        categoryId,
+        ownership,
+        paidBy,
+        fingerprint,
+        source,
+        normalizeBank(body.bank),
+        now,
+        now,
+      )
+      .run();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    if (/UNIQUE|constraint/i.test(message)) {
+      return json({ error: "Ese gasto ya está cargado" }, 409);
+    }
+    throw err;
+  }
 
   let receipt: { id: string } | null = null;
   if (items.length > 0) {
@@ -485,6 +522,7 @@ type TxBefore = {
   date: string;
   amount_ars: string | null;
   amount_usd: string | null;
+  source: string;
   category_name: string | null;
   category_slug: string | null;
 };
@@ -503,7 +541,7 @@ async function patchTransaction(
   const before = await env.DB.prepare(
     `SELECT t.id, t.ownership, t.paid_by_user_id, t.category_id, t.description_normalized,
             t.external_fingerprint, t.is_payment, t.is_credit, t.is_business, t.business_version,
-            t.date, t.amount_ars, t.amount_usd, c.name AS category_name, c.slug AS category_slug
+            t.date, t.amount_ars, t.amount_usd, t.source, c.name AS category_name, c.slug AS category_slug
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
      WHERE t.id = ? AND t.household_id = ?
@@ -541,18 +579,65 @@ async function patchTransaction(
   if ("paidByUserId" in body && body.ownership !== "personal") {
     set("paid_by_user_id", typeof body.paidByUserId === "string" ? body.paidByUserId : null);
   }
-  if ("date" in body && typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+  let nextDate = before.date;
+  let nextArs = before.amount_ars;
+  let nextUsd = before.amount_usd;
+  if ("date" in body) {
+    if (typeof body.date !== "string" || !isCalendarDate(body.date)) {
+      return json({ error: "Fecha inválida (YYYY-MM-DD)" }, 400);
+    }
+    nextDate = body.date;
     set("date", body.date);
   }
+  let nextDescription = before.description_normalized;
   if (typeof body.description === "string" && body.description.trim()) {
     const description = [...body.description.trim()].slice(0, 500).join("");
+    nextDescription = description;
     set("description_normalized", description);
     set("description_raw", description);
   }
-  if ("amountArs" in body) set("amount_ars", moneyOrNull(body.amountArs));
-  if ("amountUsd" in body) set("amount_usd", moneyOrNull(body.amountUsd));
+  if ("amountArs" in body) {
+    const parsed = parseExpenseAmount(body.amountArs);
+    if (!parsed.ok) return json({ error: "Monto inválido" }, 400);
+    nextArs = expenseAmountText(parsed.amount);
+    set("amount_ars", nextArs);
+  }
+  if ("amountUsd" in body) {
+    const parsed = parseExpenseAmount(body.amountUsd);
+    if (!parsed.ok) return json({ error: "Monto inválido" }, 400);
+    nextUsd = expenseAmountText(parsed.amount);
+    set("amount_usd", nextUsd);
+  }
+  if (
+    (nextArs == null || nextArs === "0.00") &&
+    (nextUsd == null || nextUsd === "0.00") &&
+    ("amountArs" in body || "amountUsd" in body)
+  ) {
+    return json({ error: "Indicá un monto en $ o USD" }, 400);
+  }
   if ("bank" in body) set("bank", normalizeBank(typeof body.bank === "string" ? body.bank : null));
-  if ("splitPct" in body && typeof body.splitPct === "number") set("split_pct", body.splitPct);
+  if ("splitPct" in body) {
+    const pct = body.splitPct;
+    if (typeof pct !== "number" || !Number.isInteger(pct) || pct < 0 || pct > 100) {
+      return json({ error: "Porcentaje inválido" }, 400);
+    }
+    set("split_pct", pct);
+  }
+  if (
+    (before.source === "manual" || before.source === "receipt") &&
+    (nextDate !== before.date || nextArs !== before.amount_ars || nextUsd !== before.amount_usd)
+  ) {
+    const fingerprint = (await sha256Hex(
+      manualFingerprintMaterial({
+        householdId: active.id,
+        date: nextDate,
+        description: nextDescription,
+        amountArs: nextArs,
+        amountUsd: nextUsd,
+      }),
+    )).slice(0, 32);
+    set("external_fingerprint", fingerprint);
+  }
   if (body.isPayment === true || body.isPayment === false) set("is_payment", body.isPayment ? 1 : 0);
 
   const wantsInternal = body.internalTransfer === true || body.internalTransfer === 1 || body.internalTransfer === "true";
@@ -668,13 +753,21 @@ async function patchTransaction(
     const update = env.DB.prepare(
       `UPDATE transactions SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
     ).bind(...binds, before.id, active.id);
-    if (draft) {
-      await env.DB.batch([update, ...enqueueOutboxStatements(env.DB, draft)]);
-      const push = flushOutbox(env, [draft.id]);
-      if (ctx) ctx.waitUntil(push);
-      else void push;
-    } else {
-      await update.run();
+    try {
+      if (draft) {
+        await env.DB.batch([update, ...enqueueOutboxStatements(env.DB, draft)]);
+        const push = flushOutbox(env, [draft.id]);
+        if (ctx) ctx.waitUntil(push);
+        else void push;
+      } else {
+        await update.run();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/UNIQUE|constraint/i.test(message)) {
+        return json({ error: "Ese gasto ya está cargado" }, 409);
+      }
+      throw err;
     }
   }
 
@@ -832,6 +925,8 @@ async function categoryIdBySlug(env: Env, slug: string): Promise<string | null> 
     .first<{ id: string }>();
   return row?.id ?? null;
 }
+
+
 
 function moneyOrNull(value: unknown): string | null {
   if (value == null || value === "") return null;

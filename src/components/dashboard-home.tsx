@@ -527,12 +527,7 @@ function HomeLayoutEditor({
           );
         })}
       </ul>
-      <Link
-        href="/suscripcion"
-        className="mt-3 inline-flex text-[11px] font-medium text-[var(--muted-fg)] underline-offset-2 hover:text-[var(--foreground)] hover:underline"
-      >
-        Plan y suscripción
-      </Link>
+
     </div>
   );
 }
@@ -556,6 +551,7 @@ export function DashboardHome({
   savingsUsdc = 0,
   savingsNetArs = 0,
   incomeArs = 0,
+  householdName,
 }: {
   firstName: string;
   period: string;
@@ -919,6 +915,7 @@ export function DashboardHome({
           </p>
           <p className="mt-0.5 text-sm capitalize text-[var(--muted-fg)]">
             {formatPeriodLabel(period)}
+            {householdName ? ` · ${householdName}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-1.5">

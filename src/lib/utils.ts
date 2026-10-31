@@ -7,7 +7,7 @@ export function cn(...inputs: ClassValue[]) {
 
 /** Pesos argentinos — always with $ and es-AR separators */
 export function formatArs(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return "—";
+  if (value == null || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("es-AR", {
     style: "currency",
     currency: "ARS",
@@ -20,7 +20,7 @@ export function formatArs(value: number | null | undefined): string {
  * Shows "USD 24,00" so it's obvious on mobile.
  */
 export function formatUsd(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return "—";
+  if (value == null || !Number.isFinite(value)) return "—";
   const n = new Intl.NumberFormat("es-AR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,

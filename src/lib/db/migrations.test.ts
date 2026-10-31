@@ -10,7 +10,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 function openMigrated(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
-  for (const file of ["0001_app.sql", "0002_auth.sql", "0003_serpix_sync.sql"]) {
+  for (const file of [
+    "0001_app.sql",
+    "0002_auth.sql",
+    "0003_serpix_sync.sql",
+    "0004_card_closed.sql",
+  ]) {
     db.exec(readFileSync(join(root, "migrations", file), "utf8"));
   }
   return db;
@@ -78,6 +83,12 @@ describe("D1 migrations on node:sqlite", () => {
     const names = new Set(cols.map((c) => c.name));
     assert.ok(names.has("saldo_deuda_ars"));
     assert.ok(names.has("saldo_deuda_usd"));
+    const cardCols = db.prepare("PRAGMA table_info(card_statements)").all() as Array<{
+      name: string;
+    }>;
+    const cardNames = new Set(cardCols.map((c) => c.name));
+    assert.ok(cardNames.has("closed_at"));
+    assert.ok(cardNames.has("status"));
     assert.ok(names.has("force_settled"));
   });
 
