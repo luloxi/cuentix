@@ -17,9 +17,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
  * disagreed with `isExpenseRow` on a production backup (wallet transfers,
  * retiros) plus spends that must stay.
  *
- * Numeric-only descriptions are the documented SQL difference: legacy
+ * Numeric-only descriptions are a documented SQL difference: legacy
  * `isBankAccountingEntry` treats every amount-only tipo as accounting, while
- * SQL counts them unless a Fiwind echo twin exists within 2 days.
+ * SQL counts them unless the Ockham 1:1 Fiwind echo rule drops them.
+ * "Transferencia inmediata" and a bare "TRANSFERENCIA" are the other
+ * difference: SQL counts them as spends. JS still treats both as internal
+ * on the income side.
  */
 const ROWS: Array<{
   id: string;
@@ -56,7 +59,8 @@ const ROWS: Array<{
   { id: "w12", description: "TRANSF. POR PESIFICACION.", expense: false },
   { id: "w13", description: "CREDITOS VS EN USD-INTER-", expense: false },
   { id: "w14", description: "CR TBE INM COE", expense: false },
-  { id: "w15", description: "Transferencia inmediata", expense: false },
+  { id: "w15", description: "Transferencia inmediata", expense: false, sqlExpense: true },
+  { id: "w16", description: "TRANSFERENCIA", expense: false, sqlExpense: true },
   { id: "s1", description: "COMPRA SUPER ARS", expense: true },
   { id: "s2", description: "Pago a DIA", date: "2026-08-04", amountArs: "10.00", expense: true },
   { id: "s3", description: "TRANSFERENCIA A JUAN", expense: true },
@@ -81,7 +85,7 @@ function expected(row: (typeof ROWS)[number]): boolean {
 }
 
 describe("EXPENSE_SQL matches isExpenseRow on the phrases that drifted", () => {
-  it("agrees row by row, except unpaired numeric tipos", () => {
+  it("agrees row by row, except documented SQL differences", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(`
       CREATE TABLE transactions (
@@ -130,11 +134,11 @@ describe("EXPENSE_SQL matches isExpenseRow on the phrases that drifted", () => {
       assert.equal(legacy, row.expense, `${row.description} fixture`);
       const sqlKept = kept.has(row.id);
       if (row.sqlExpense != null) {
-        assert.equal(isBankAccountingEntry(row.description), true, `${row.description} legacy numeric`);
-        assert.equal(legacy, false, `${row.description} legacy excludes amount-only`);
+        assert.equal(isBankAccountingEntry(row.description), true, `${row.description} legacy accounting`);
+        assert.equal(legacy, false, `${row.description} legacy excludes`);
         assert.equal(sqlKept, row.sqlExpense, `${row.description} sql`);
         if (row.sqlExpense) {
-          assert.notEqual(sqlKept, legacy, `${row.description} sql keeps unpaired numeric`);
+          assert.notEqual(sqlKept, legacy, `${row.description} sql keeps what legacy drops`);
         }
       } else {
         assert.equal(sqlKept, legacy, row.description);
@@ -145,6 +149,8 @@ describe("EXPENSE_SQL matches isExpenseRow on the phrases that drifted", () => {
     assert.equal(kept.has("s1"), true);
     assert.equal(kept.has("w4"), false);
     assert.equal(kept.has("w1"), false);
+    assert.equal(kept.has("w15"), true);
+    assert.equal(kept.has("w16"), true);
     assert.equal(kept.has("s3"), true);
   });
 
@@ -166,18 +172,251 @@ describe("EXPENSE_SQL matches isExpenseRow on the phrases that drifted", () => {
       )
       .all("hh", "t1", "2026-08-18", "2026-08-18", "2026-08-18") as Array<{ detail: string }>;
     assert.match(plan.map((row) => row.detail).join("\n"), /tx_household_date_idx/);
+    const grouped = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT echo.date
+         FROM transactions echo
+         WHERE echo.household_id = ?
+           AND echo.date >= date(?, '-2 days')
+           AND echo.date <= date(?, '+2 days')
+           AND abs(julianday(echo.date) - julianday(?)) <= 2
+           AND (
+             (
+               abs(CAST(IFNULL(?, '0') AS REAL)) >= 0.01
+               AND abs(CAST(IFNULL(echo.amount_ars, '0') AS REAL) - CAST(IFNULL(?, '0') AS REAL)) < 0.01
+             )
+             OR (
+               abs(CAST(IFNULL(?, '0') AS REAL)) >= 0.005
+               AND abs(CAST(IFNULL(echo.amount_usd, '0') AS REAL) - CAST(IFNULL(?, '0') AS REAL)) < 0.005
+             )
+           )
+         GROUP BY echo.date`,
+      )
+      .all("hh", "2026-08-18", "2026-08-18", "2026-08-18", "10", "10", "0", "0") as Array<{ detail: string }>;
+    assert.match(grouped.map((row) => row.detail).join("\n"), /tx_household_date_idx/);
+  });
+});
+
+type EchoRow = {
+  id: string;
+  description: string;
+  householdId?: string;
+  date?: string;
+  bank?: string | null;
+  amountArs?: string | null;
+  amountUsd?: string | null;
+  isPayment?: number;
+  isCredit?: number;
+  source?: string;
+};
+
+function keptExpenses(rows: EchoRow[]): Set<string> {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE transactions (
+      id text,
+      household_id text,
+      date text,
+      description_normalized text,
+      source text,
+      is_payment integer,
+      is_credit integer,
+      linked_transaction_id text,
+      bank text,
+      amount_ars text,
+      amount_usd text
+    );
+  `);
+  const insert = db.prepare(
+    `INSERT INTO transactions (
+       id, household_id, date, description_normalized, source, is_payment, is_credit,
+       linked_transaction_id, bank, amount_ars, amount_usd
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+  );
+  for (const row of rows) {
+    insert.run(
+      row.id,
+      row.householdId ?? "hh",
+      row.date ?? "2026-08-18",
+      row.description,
+      row.source ?? "bbva_import",
+      row.isPayment ?? 0,
+      row.isCredit ?? 0,
+      row.bank ?? null,
+      row.amountArs ?? null,
+      row.amountUsd ?? null,
+    );
+  }
+  const matched = db.prepare(`SELECT id FROM transactions t WHERE ${EXPENSE_SQL}`).all() as Array<{ id: string }>;
+  return new Set(matched.map((row) => row.id));
+}
+
+describe("Ockham Fiwind numeric echoes", () => {
+  it("drops a same-day named expense of the same amount", () => {
+    const kept = keptExpenses([
+      { id: "num", description: "15420.50", bank: "Fiwind", date: "2026-08-18", amountArs: "15420.50" },
+      { id: "named", description: "Pago a DIA", bank: "BBVA", date: "2026-08-18", amountArs: "15420.50", source: "manual" },
+    ]);
+    assert.equal(kept.has("num"), false);
+    assert.equal(kept.has("named"), true);
+  });
+
+  it("drops a named expense one day away and keeps one three days away", () => {
+    const near = keptExpenses([
+      { id: "num", description: "100.00", bank: "Fiwind", date: "2026-08-10", amountArs: "100.00" },
+      { id: "named", description: "Kiosco", date: "2026-08-11", amountArs: "100.00" },
+    ]);
+    assert.equal(near.has("num"), false);
+    assert.equal(near.has("named"), true);
+    const edge = keptExpenses([
+      { id: "num", description: "101.00", bank: "Fiwind", date: "2026-08-10", amountArs: "101.00" },
+      { id: "named", description: "Kiosco", date: "2026-08-08", amountArs: "101.00" },
+    ]);
+    assert.equal(edge.has("num"), false);
+    const far = keptExpenses([
+      { id: "num", description: "102.00", bank: "Fiwind", date: "2026-08-10", amountArs: "102.00" },
+      { id: "named", description: "Kiosco", date: "2026-08-13", amountArs: "102.00" },
+    ]);
+    assert.equal(far.has("num"), true);
+    assert.equal(far.has("named"), true);
+  });
+
+  it("keeps the numeric row when the same amount is in another household", () => {
+    const kept = keptExpenses([
+      { id: "num", description: "80.00", bank: "Fiwind", date: "2026-08-18", amountArs: "80.00", householdId: "hh-a" },
+      { id: "named", description: "Pago a DIA", date: "2026-08-18", amountArs: "80.00", householdId: "hh-b" },
+    ]);
+    assert.equal(kept.has("num"), true);
+    assert.equal(kept.has("named"), true);
+  });
+
+  it("payment/credit named twin does cancel (1:1)", () => {
+    const kept = keptExpenses([
+      { id: "num-pay", description: "40.00", bank: "Fiwind", date: "2026-08-18", amountArs: "40.00" },
+      { id: "num-pay-2", description: "40.00", bank: "Fiwind", date: "2026-08-18", amountArs: "40.00" },
+      { id: "pay", description: "Alquiler", date: "2026-08-18", amountArs: "40.00", isPayment: 1 },
+      { id: "num-cr", description: "41.00", bank: "Fiwind", date: "2026-08-18", amountArs: "41.00" },
+      { id: "num-cr-2", description: "41.00", bank: "Fiwind", date: "2026-08-18", amountArs: "41.00" },
+      { id: "cr", description: "Devolucion super", date: "2026-08-18", amountArs: "41.00", isCredit: 1 },
+    ]);
+    assert.equal(kept.has("num-pay"), false);
+    assert.equal(kept.has("num-pay-2"), true);
+    assert.equal(kept.has("pay"), false);
+    assert.equal(kept.has("num-cr"), false);
+    assert.equal(kept.has("num-cr-2"), true);
+    assert.equal(kept.has("cr"), false);
+  });
+
+  it("pairs one named twin with one of two numeric rows, ordered by id", () => {
+    const kept = keptExpenses([
+      { id: "n1", description: "50.00", bank: "Fiwind", date: "2026-08-18", amountArs: "50.00" },
+      { id: "n2", description: "50.00", bank: "Fiwind", date: "2026-08-18", amountArs: "50.00" },
+      { id: "named", description: "Cafe", date: "2026-08-18", amountArs: "50.00" },
+    ]);
+    assert.equal(kept.has("n1"), false);
+    assert.equal(kept.has("n2"), true);
+    assert.equal(kept.has("named"), true);
+    assert.equal([...kept].filter((id) => id === "n1" || id === "n2").length, 1);
+  });
+
+  it("drops both numeric rows when two named twins exist", () => {
+    const kept = keptExpenses([
+      { id: "n1", description: "70.00", bank: "Fiwind", date: "2026-08-18", amountArs: "70.00" },
+      { id: "n2", description: "70.00", bank: "Fiwind", date: "2026-08-18", amountArs: "70.00" },
+      { id: "a", description: "Uno", date: "2026-08-18", amountArs: "70.00" },
+      { id: "b", description: "Dos", date: "2026-08-18", amountArs: "70.00" },
+    ]);
+    assert.equal(kept.has("n1"), false);
+    assert.equal(kept.has("n2"), false);
+    assert.equal(kept.has("a"), true);
+    assert.equal(kept.has("b"), true);
+  });
+
+  it("keeps both numeric rows when no named twin exists", () => {
+    const kept = keptExpenses([
+      { id: "n1", description: "9.00", bank: "Fiwind", date: "2026-08-18", amountArs: "9.00" },
+      { id: "n2", description: "9.00", bank: "Fiwind", date: "2026-08-18", amountArs: "9.00" },
+    ]);
+    assert.equal(kept.has("n1"), true);
+    assert.equal(kept.has("n2"), true);
+  });
+
+  it("matches ARS within 0.01 and USD within 0.005, and ignores a wider gap", () => {
+    const arsNear = keptExpenses([
+      { id: "num", description: "200.00", bank: "Fiwind", date: "2026-08-18", amountArs: "200.00" },
+      { id: "named", description: "Near", date: "2026-08-18", amountArs: "200.004" },
+    ]);
+    assert.equal(arsNear.has("num"), false);
+    const arsFar = keptExpenses([
+      { id: "num", description: "201.00", bank: "Fiwind", date: "2026-08-18", amountArs: "201.00" },
+      { id: "named", description: "Far", date: "2026-08-18", amountArs: "201.02" },
+    ]);
+    assert.equal(arsFar.has("num"), true);
+    const usdNear = keptExpenses([
+      { id: "num", description: "8.00", bank: "Fiwind", date: "2026-08-18", amountArs: "0", amountUsd: "8.00" },
+      { id: "named", description: "USD shop", bank: "BBVA", date: "2026-08-18", amountUsd: "8.004", source: "manual" },
+    ]);
+    assert.equal(usdNear.has("num"), false);
+    assert.equal(usdNear.has("named"), true);
+    const usdFar = keptExpenses([
+      { id: "num", description: "8.50", bank: "Fiwind", date: "2026-08-18", amountUsd: "8.50" },
+      { id: "named", description: "USD far", date: "2026-08-18", amountUsd: "8.52" },
+    ]);
+    assert.equal(usdFar.has("num"), true);
+    const usdOnly = keptExpenses([
+      { id: "num", description: "12.50", bank: "Fiwind", date: "2026-08-18", amountArs: null, amountUsd: "12.50" },
+      { id: "named", description: "Spotify", date: "2026-08-18", amountArs: "999.00", amountUsd: "12.50" },
+    ]);
+    assert.equal(usdOnly.has("num"), false);
+  });
+
+  it("prefers a same-day named twin over an earlier numeric in the window", () => {
+    const kept = keptExpenses([
+      { id: "early", description: "100.00", bank: "Fiwind", date: "2026-08-01", amountArs: "100.00" },
+      { id: "later", description: "100.00", bank: "Fiwind", date: "2026-08-02", amountArs: "100.00" },
+      { id: "named", description: "Pago a DIA", bank: "BBVA", date: "2026-08-02", amountArs: "100.00", source: "csv_import" },
+    ]);
+    assert.equal(kept.has("early"), true);
+    assert.equal(kept.has("later"), false);
+    assert.equal(kept.has("named"), true);
+  });
+
+  it("does not treat a numeric row from another bank as a Fiwind echo", () => {
+    const kept = keptExpenses([
+      { id: "num", description: "60.00", bank: "BBVA", date: "2026-08-18", amountArs: "60.00" },
+      { id: "named", description: "Pago a DIA", date: "2026-08-18", amountArs: "60.00" },
+    ]);
+    assert.equal(kept.has("num"), true);
+    assert.equal(kept.has("named"), true);
   });
 });
 
 describe("consumosVisibleSql matches the legacy list filter", () => {
   it("hides bank accounting that is not an internal transfer", () => {
-    const rows = [
-      { description: "18.07", visible: true, numeric: true },
+    const rows: Array<{
+      description: string;
+      visible: boolean;
+      numeric?: boolean;
+      isPayment?: number;
+      isCredit?: number;
+      slug?: string;
+      source?: string;
+      id?: string;
+      bank?: string | null;
+      date?: string;
+      amountArs?: string | null;
+    }> = [
+      { description: "18.07", bank: "Fiwind", amountArs: "18.07", visible: true, numeric: true },
+      { id: "echo-c", description: "15420.50", bank: "Fiwind", date: "2026-08-18", amountArs: "15420.50", visible: false },
+      { id: "twin-c", description: "Pago a DIA", bank: "BBVA", date: "2026-08-18", amountArs: "15420.50", source: "manual", visible: true },
       { description: "TRANSF. POR PESIFICACION.", visible: false },
       { description: "CREDITOS VS EN USD-INTER-", visible: false },
       { description: "Retiro", visible: false },
       { description: "Compra KO", visible: false },
       { description: "TRANSFERENCIA ARS", visible: false },
+      { description: "Transferencia inmediata", visible: true },
+      { description: "TRANSFERENCIA", visible: true },
       { description: "COMPRA SUPER ARS", visible: true },
       { description: "TRANSFERENCIA A JUAN", visible: true },
       { description: "MERPAGO*TEMBICI", visible: true },
@@ -209,16 +448,23 @@ describe("consumosVisibleSql matches the legacy list filter", () => {
       INSERT INTO categories (id, slug) VALUES ('luz', 'luz');
     `);
     const insert = db.prepare(
-      `INSERT INTO transactions (description_normalized, source, is_payment, is_credit, category_id)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO transactions (
+         id, household_id, date, description_normalized, source, is_payment, is_credit,
+         category_id, bank, amount_ars
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const row of rows) {
       insert.run(
+        row.id ?? row.description,
+        "hh",
+        row.date ?? "2026-08-18",
         row.description,
         row.source ?? "bbva_import",
         row.isPayment ?? 0,
         row.isCredit ?? 0,
         row.slug ?? null,
+        row.bank ?? null,
+        row.amountArs ?? null,
       );
       const slug = row.slug ?? null;
       const legacy =

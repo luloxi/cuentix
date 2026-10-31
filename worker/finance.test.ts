@@ -369,6 +369,83 @@ describe("patrimonio snapshots", () => {
     const still = db.prepare("SELECT COUNT(*) AS n FROM patrimonio_snapshots").get() as { n: number };
     assert.equal(still.n, 1);
   });
+
+  it("cron writes once and ignores a later blue move", async () => {
+    const db = openDb();
+    seedHousehold(db);
+    seedSavings(db, "user-a", "100.00", "5.00");
+    const log: LogEntry[] = [];
+    const env = envFor(db, log);
+    const first = await captureDailySnapshots(env, 1000);
+    assert.deepEqual(first, { written: 1, unchanged: 0, missingFx: false });
+    log.length = 0;
+    const second = await captureDailySnapshots(env, 1600);
+    assert.deepEqual(second, { written: 0, unchanged: 1, missingFx: false });
+    assert.equal(writes(log).length, 0);
+    const stored = db.prepare(
+      "SELECT assets_ars, assets_usd, fx_rate, net_worth_ars FROM patrimonio_snapshots",
+    ).get() as { assets_ars: string; assets_usd: string; fx_rate: string; net_worth_ars: string };
+    assert.equal(stored.assets_ars, "5100.00");
+    assert.equal(stored.assets_usd, "5.00");
+    assert.equal(stored.fx_rate, "1000.00");
+    assert.equal(stored.net_worth_ars, "5100.00");
+    assert.equal(await captureUserSnapshot(env, "user-a", 1600, "change"), "unchanged");
+    assert.equal(writes(log).length, 0);
+
+    db.prepare("UPDATE savings_assets SET amount_ars = '250.00' WHERE user_id = 'user-a'").run();
+    assert.equal(await captureUserSnapshot(env, "user-a", 1600, "change"), "written");
+    const saved = db.prepare(
+      "SELECT assets_ars, fx_rate, net_worth_ars FROM patrimonio_snapshots",
+    ).get() as { assets_ars: string; fx_rate: string; net_worth_ars: string };
+    assert.equal(saved.assets_ars, "8250.00");
+    assert.equal(saved.fx_rate, "1600.00");
+    assert.equal(saved.net_worth_ars, "8250.00");
+
+    primeFxForTests({ blue: 2000 });
+    const res = await handlePatrimonioSnapshot(
+      new Request("https://cuentix.test/api/patrimonio/snapshot", { method: "POST" }),
+      env,
+      userA,
+    );
+    const body = (await res.json()) as { snapshot: string };
+    assert.equal(body.snapshot, "written");
+    const forced = db.prepare(
+      "SELECT assets_ars, fx_rate, net_worth_ars FROM patrimonio_snapshots",
+    ).get() as { assets_ars: string; fx_rate: string; net_worth_ars: string };
+    assert.equal(forced.assets_ars, "10250.00");
+    assert.equal(forced.fx_rate, "2000.00");
+    assert.equal(forced.net_worth_ars, "10250.00");
+    const count = db.prepare("SELECT COUNT(*) AS n FROM patrimonio_snapshots").get() as { n: number };
+    assert.equal(count.n, 1);
+  });
+
+  it("change mode keeps USD debt priced at the stored blue until force", async () => {
+    const db = openDb();
+    seedHousehold(db);
+    seedSavings(db, "user-a", "100.00", "0.00");
+    db.prepare(
+      `INSERT INTO debt_settings (user_id, force_settled, saldo_deuda_ars, saldo_deuda_usd, card_last4)
+       VALUES ('user-a', 0, '0.00', '10.00', '4242')`,
+    ).run();
+    const log: LogEntry[] = [];
+    const env = envFor(db, log);
+    assert.equal(await captureUserSnapshot(env, "user-a", 1000, "change"), "written");
+    log.length = 0;
+    assert.equal(await captureUserSnapshot(env, "user-a", 1800, "change"), "unchanged");
+    assert.equal(writes(log).length, 0);
+    const held = db.prepare(
+      "SELECT fx_rate, net_worth_ars, debt_usd FROM patrimonio_snapshots",
+    ).get() as { fx_rate: string; net_worth_ars: string; debt_usd: string };
+    assert.equal(held.fx_rate, "1000.00");
+    assert.equal(held.debt_usd, "10.00");
+    assert.equal(held.net_worth_ars, "-9900.00");
+    assert.equal(await captureUserSnapshot(env, "user-a", 1800, "force"), "written");
+    const forced = db.prepare(
+      "SELECT fx_rate, net_worth_ars FROM patrimonio_snapshots",
+    ).get() as { fx_rate: string; net_worth_ars: string };
+    assert.equal(forced.fx_rate, "1800.00");
+    assert.equal(forced.net_worth_ars, "-17900.00");
+  });
 });
 
 describe("monthly cash flow", () => {
