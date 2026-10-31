@@ -3,7 +3,8 @@ import { loadFx, monthEndBuy } from "./fx";
 import { activeHousehold, forceSharedOnly, type HouseholdRow } from "./household";
 import { sumIncomeArs } from "./income";
 import { debtFigure } from "../src/lib/stats/debt";
-import { ARS_EXPR, CLOSED_STATEMENT_SQL, EXPENSE_SQL, USD_EXPR } from "./sql";
+import { loadFiwindEchoIds } from "./fiwind-dups";
+import { ARS_EXPR, CLOSED_STATEMENT_SQL, USD_EXPR, expenseSql } from "./sql";
 import { currentPeriodAr, json, num, periodRange, shiftPeriod } from "./http";
 import type { SessionUser } from "./auth";
 
@@ -30,11 +31,13 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
 
   const sharedOnly = forceSharedOnly(active.name);
   const fxPromise = loadFx();
+  // One echo lookup for this user. A D1 failure counts every row.
+  const echoIds = await loadFiwindEchoIds(env.DB, user.id);
   const [own, shared, categories, paidSlugs, savings, debt, incomes, fx] = await Promise.all([
-    totals(env, active, user.id, sharedOnly, current.start, previous.start, current.end),
-    totals(env, active, user.id, true, current.start, previous.start, current.end),
-    categoryBreakdown(env, active, user.id, sharedOnly, current.start, current.end),
-    paidServiceSlugs(env, active.id, current.start, current.end),
+    totals(env, active, user.id, sharedOnly, current.start, previous.start, current.end, echoIds),
+    totals(env, active, user.id, true, current.start, previous.start, current.end, echoIds),
+    categoryBreakdown(env, active, user.id, sharedOnly, current.start, current.end, echoIds),
+    paidServiceSlugs(env, active.id, current.start, current.end, echoIds),
     savingsTotals(env, user.id),
     debtSnapshot(env, user.id),
     incomeRows(env, user.id),
@@ -115,6 +118,7 @@ async function totals(
   currentStart: string,
   from: string,
   to: string,
+  echoIds: readonly string[],
 ): Promise<PeriodTotals> {
   const { where, binds } = visibility(household, userId, sharedOnly);
   const sql = `
@@ -127,7 +131,7 @@ async function totals(
     WHERE t.household_id = ?
       AND t.date >= ?
       AND t.date < ?
-      AND ${EXPENSE_SQL}
+      AND ${expenseSql(echoIds)}
       AND ${where}
     GROUP BY bucket
   `;
@@ -154,6 +158,7 @@ async function categoryBreakdown(
   sharedOnly: boolean,
   from: string,
   to: string,
+  echoIds: readonly string[],
 ) {
   const { where, binds } = visibility(household, userId, sharedOnly);
   const sql = `
@@ -163,7 +168,7 @@ async function categoryBreakdown(
     LEFT JOIN categories c ON c.id = t.category_id
     WHERE t.household_id = ?
       AND t.date >= ? AND t.date < ?
-      AND ${EXPENSE_SQL}
+      AND ${expenseSql(echoIds)}
       AND ${where}
     GROUP BY t.category_id
   `;
@@ -179,7 +184,13 @@ async function categoryBreakdown(
   }));
 }
 
-async function paidServiceSlugs(env: Env, householdId: string, from: string, to: string) {
+async function paidServiceSlugs(
+  env: Env,
+  householdId: string,
+  from: string,
+  to: string,
+  echoIds: readonly string[],
+) {
   const sql = `
     SELECT DISTINCT c.slug AS slug
     FROM transactions t
@@ -187,7 +198,7 @@ async function paidServiceSlugs(env: Env, householdId: string, from: string, to:
     WHERE t.household_id = ?
       AND t.date >= ? AND t.date < ?
       AND t.ownership = 'shared'
-      AND ${EXPENSE_SQL}
+      AND ${expenseSql(echoIds)}
       AND c.slug IN ('alquiler', 'luz', 'agua', 'gas', 'internet')
   `;
   const res = await env.DB.prepare(sql)

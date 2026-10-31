@@ -218,10 +218,10 @@ export function isTransferenciaInternaTipo(
  * wallet TRANSFERENCIA ARS, own-account “cuenta tuya”, FX, and amount-only Tipo.
  * They must not inflate “gastos” totals in Análisis / Consumos.
  * COMPRA SUPER ARS is grocery spend, not an investment.
- * Amount-only tipos are always accounting here. SQL (`worker/sql.ts`) applies
- * the Ockham rule instead: a Fiwind numeric row counts unless a named row
- * (expense or not) of the same amount wins the 1:1 pairing. The Fiwind
- * row itself is only ever dropped. "Transferencia inmediata" and bare
+ * Amount-only tipos are always accounting here. Expense SQL counts a Fiwind
+ * numeric row unless `pairFiwindEchoes` drops that id (own currency,
+ * closest-first, 1:1, households of the requesting user). The Fiwind row
+ * itself is only ever dropped. "Transferencia inmediata" and bare
  * "TRANSFERENCIA" stay accounting here via the income-side detector and count
  * as spends in SQL.
  */

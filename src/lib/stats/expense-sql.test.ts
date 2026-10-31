@@ -8,7 +8,13 @@ import { isExpenseRow } from "./monthly-expenses";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { consumosVisibleSql, EXPENSE_SQL } from "../../../worker/sql";
+import {
+  FIWIND_ECHO_CANDIDATE_SQL,
+  loadFiwindEchoIds,
+  pairFiwindEchoes,
+  type FiwindEchoRow,
+} from "../../../worker/fiwind-dups";
+import { ARS_EXPR, USD_EXPR, consumosVisibleSql, expenseSql, EXPENSE_SQL } from "../../../worker/sql";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -19,10 +25,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
  *
  * Numeric-only descriptions are a documented SQL difference: legacy
  * `isBankAccountingEntry` treats every amount-only tipo as accounting, while
- * SQL counts them unless the Ockham 1:1 Fiwind echo rule drops them.
+ * SQL counts them unless `pairFiwindEchoes` drops that id.
  * "Transferencia inmediata" and a bare "TRANSFERENCIA" are the other
  * difference: SQL counts them as spends. JS still treats both as internal
- * on the income side.
+ * on the income side. A longer BBVA line that only contains that phrase
+ * counts as a spend and stays on Consumos.
  */
 const ROWS: Array<{
   id: string;
@@ -72,6 +79,18 @@ const ROWS: Array<{
   { id: "s9", description: "Resumen", source: "bbva_pdf", expense: false },
   { id: "s10", description: "Luz hogar", linked: "other", source: "csv_import", expense: false },
   { id: "s11", description: "Uber", linked: "x", source: "invoice_iog", expense: true },
+  {
+    id: "k60",
+    description:
+      "outgoing transfer (payee unknown) | transferencia inmediata | 100 - banca online | payee not in export",
+    bank: "BBVA",
+    date: "2026-08-20",
+    amountArs: "60000",
+    isPayment: 0,
+    isCredit: 0,
+    expense: false,
+    sqlExpense: true,
+  },
 ];
 
 function expected(row: (typeof ROWS)[number]): boolean {
@@ -124,9 +143,21 @@ describe("EXPENSE_SQL matches isExpenseRow on the phrases that drifted", () => {
         null,
       );
     }
+    const drop = pairFiwindEchoes(
+      ROWS.map((row) => ({
+        id: row.id,
+        householdId: row.householdId ?? "hh",
+        date: row.date ?? "2026-08-18",
+        bank: row.bank ?? null,
+        description: row.description,
+        amountArs: row.amountArs ?? null,
+        amountUsd: null,
+      })),
+      new Set(ROWS.map((row) => row.householdId ?? "hh")),
+    );
     const matched = db
       .prepare(
-        `SELECT id FROM transactions t WHERE ${EXPENSE_SQL}`,
+        `SELECT id FROM transactions t WHERE ${expenseSql(drop)}`,
       )
       .all() as Array<{ id: string }>;
     const kept = new Set(matched.map((row) => row.id));
@@ -153,119 +184,7 @@ describe("EXPENSE_SQL matches isExpenseRow on the phrases that drifted", () => {
     assert.equal(kept.has("w15"), true);
     assert.equal(kept.has("w16"), true);
     assert.equal(kept.has("s3"), true);
-  });
-
-  it("uses tx_household_date_idx for the echo lookup", () => {
-    const db = new DatabaseSync(":memory:");
-    db.exec("PRAGMA foreign_keys = OFF");
-    for (const file of ["0001_app.sql", "0002_auth.sql", "0003_serpix_sync.sql", "0004_card_closed.sql"]) {
-      db.exec(readFileSync(join(root, "migrations", file), "utf8"));
-    }
-    const plan = db
-      .prepare(
-        `EXPLAIN QUERY PLAN
-         SELECT 1 FROM transactions echo
-         WHERE echo.household_id = ?
-           AND echo.id <> ?
-           AND echo.date >= date(?, '-2 days')
-           AND echo.date <= date(?, '+2 days')
-           AND abs(julianday(echo.date) - julianday(?)) <= 2`,
-      )
-      .all("hh", "t1", "2026-08-18", "2026-08-18", "2026-08-18") as Array<{ detail: string }>;
-    assert.match(plan.map((row) => row.detail).join("\n"), /tx_household_date_idx/);
-    const grouped = db
-      .prepare(
-        `EXPLAIN QUERY PLAN
-         SELECT echo.date
-         FROM transactions echo
-         WHERE echo.household_id = ?
-           AND echo.date >= date(?, '-2 days')
-           AND echo.date <= date(?, '+2 days')
-           AND abs(julianday(echo.date) - julianday(?)) <= 2
-           AND (
-             (
-               abs(CAST(IFNULL(?, '0') AS REAL)) >= 0.01
-               AND abs(CAST(IFNULL(echo.amount_ars, '0') AS REAL) - CAST(IFNULL(?, '0') AS REAL)) < 0.01
-             )
-             OR (
-               abs(CAST(IFNULL(?, '0') AS REAL)) >= 0.005
-               AND abs(CAST(IFNULL(echo.amount_usd, '0') AS REAL) - CAST(IFNULL(?, '0') AS REAL)) < 0.005
-             )
-           )
-         GROUP BY echo.date`,
-      )
-      .all("hh", "2026-08-18", "2026-08-18", "2026-08-18", "10", "10", "0", "0") as Array<{ detail: string }>;
-    assert.match(grouped.map((row) => row.detail).join("\n"), /tx_household_date_idx/);
-  });
-
-  it("uses tx_household_date_idx for the cross-household echo lookup", () => {
-    const db = new DatabaseSync(":memory:");
-    db.exec("PRAGMA foreign_keys = OFF");
-    for (const file of ["0001_app.sql", "0002_auth.sql", "0003_serpix_sync.sql", "0004_card_closed.sql"]) {
-      db.exec(readFileSync(join(root, "migrations", file), "utf8"));
-    }
-    const amount = `
-      AND (
-        (
-          abs(CAST(IFNULL(?, '0') AS REAL)) >= 0.01
-          AND abs(CAST(IFNULL(xecho.amount_ars, '0') AS REAL) - CAST(IFNULL(?, '0') AS REAL)) < 0.01
-        )
-        OR (
-          abs(CAST(IFNULL(?, '0') AS REAL)) >= 0.005
-          AND abs(CAST(IFNULL(xecho.amount_usd, '0') AS REAL) - CAST(IFNULL(?, '0') AS REAL)) < 0.005
-        )
-      )`;
-    const supply = db
-      .prepare(
-        `EXPLAIN QUERY PLAN
-         SELECT xecho.household_id
-         FROM transactions xecho
-         WHERE xecho.household_id IN (SELECT id FROM households WHERE id <> ?)
-           AND xecho.date = ?
-           ${amount}
-         GROUP BY xecho.household_id`,
-      )
-      .all("hh-a", "2026-08-18", "50", "50", "0", "0") as Array<{ detail: string }>;
-    const demand = db
-      .prepare(
-        `EXPLAIN QUERY PLAN
-         SELECT n.id
-         FROM transactions n
-         WHERE n.household_id IN (SELECT id FROM households)
-           AND n.date = ?
-           AND n.id < ?
-           AND (
-             SELECT COUNT(*)
-             FROM transactions earlier
-             WHERE earlier.household_id = n.household_id
-               AND earlier.date = n.date
-               AND earlier.id < n.id
-           ) >= (
-             SELECT COUNT(*)
-             FROM transactions twin
-             WHERE twin.household_id = n.household_id
-               AND twin.date = n.date
-           )`,
-      )
-      .all("2026-08-18", "n2") as Array<{ detail: string }>;
-    for (const plan of [supply, demand]) {
-      const detail = plan.map((row) => row.detail).join("\n");
-      assert.match(detail, /tx_household_date_idx \(household_id=\? AND date=\?\)/);
-      assert.doesNotMatch(detail, /SCAN (?!households\b)/);
-    }
-    const live = db
-      .prepare(`EXPLAIN QUERY PLAN SELECT id FROM transactions t WHERE ${EXPENSE_SQL}`)
-      .all() as Array<{ detail: string }>;
-    const liveDetail = live.map((row) => row.detail).join("\n");
-    assert.match(
-      liveDetail,
-      /SEARCH xecho USING INDEX tx_household_date_idx \(household_id=\? AND date=\?\)/,
-    );
-    assert.match(
-      liveDetail,
-      /SEARCH n USING INDEX tx_household_date_idx \(household_id=\? AND date=\?\)/,
-    );
-    assert.doesNotMatch(liveDetail, /SCAN (xecho|n|transactions)\b/);
+    assert.equal(kept.has("k60"), true);
   });
 });
 
@@ -282,7 +201,21 @@ type EchoRow = {
   source?: string;
 };
 
-function keptExpenses(rows: EchoRow[]): Set<string> {
+function echoRows(rows: EchoRow[]): FiwindEchoRow[] {
+  return rows.map((row) => ({
+    id: row.id,
+    householdId: row.householdId ?? "hh",
+    date: row.date ?? "2026-08-18",
+    bank: row.bank ?? null,
+    description: row.description,
+    amountArs: row.amountArs ?? null,
+    amountUsd: row.amountUsd ?? null,
+    isPayment: row.isPayment,
+    isCredit: row.isCredit,
+  }));
+}
+
+function keptExpenses(rows: EchoRow[], userHouseholds?: ReadonlySet<string>): Set<string> {
   const db = new DatabaseSync(":memory:");
   db.exec(`
     CREATE TABLE households (id text PRIMARY KEY);
@@ -323,7 +256,12 @@ function keptExpenses(rows: EchoRow[]): Set<string> {
       row.amountUsd ?? null,
     );
   }
-  const matched = db.prepare(`SELECT id FROM transactions t WHERE ${EXPENSE_SQL}`).all() as Array<{ id: string }>;
+  const candidates = echoRows(rows);
+  const homes = userHouseholds ?? new Set(candidates.map((row) => row.householdId));
+  const drop = pairFiwindEchoes(candidates, homes);
+  const matched = db.prepare(`SELECT id FROM transactions t WHERE ${expenseSql(drop)}`).all() as Array<{
+    id: string;
+  }>;
   return new Set(matched.map((row) => row.id));
 }
 
@@ -555,7 +493,106 @@ describe("Ockham Fiwind numeric echoes", () => {
     assert.equal(kept.has("num"), true);
     assert.equal(kept.has("named"), true);
   });
+
+  it("drops only B's numeric in the household A/B case and the total keeps A's", () => {
+    const rows: EchoRow[] = [
+      { id: "a-num", description: "100", bank: "Fiwind", date: "2026-08-17", amountArs: "100", householdId: "hh-a" },
+      { id: "a-named", description: "Cafe", date: "2026-08-18", amountArs: "100", householdId: "hh-a" },
+      { id: "b-num", description: "100", bank: "Fiwind", date: "2026-08-18", amountArs: "100", householdId: "hh-b" },
+    ];
+    const kept = keptExpenses(rows);
+    assert.equal(kept.has("a-num"), true);
+    assert.equal(kept.has("b-num"), false);
+    assert.equal(kept.has("a-named"), true);
+    assert.equal([...kept].filter((id) => id === "a-num" || id === "b-num").length, 1);
+    const total = expenseTotal(rows);
+    assert.equal(Math.round(total.ars), 200);
+  });
+
+  it("does not pair 100 with -100 or a foreign household", () => {
+    const signed = keptExpenses([
+      { id: "num", description: "100", bank: "Fiwind", date: "2026-08-18", amountArs: "100" },
+      { id: "named", description: "Cafe", date: "2026-08-18", amountArs: "-100" },
+    ]);
+    assert.equal(signed.has("num"), true);
+    assert.equal(signed.has("named"), true);
+    const foreign = keptExpenses(
+      [
+        { id: "num", description: "80", bank: "Fiwind", date: "2026-08-18", amountArs: "80", householdId: "hh-user" },
+        { id: "named", description: "Cafe", date: "2026-08-18", amountArs: "80", householdId: "hh-other" },
+      ],
+      new Set(["hh-user"]),
+    );
+    assert.equal(foreign.has("num"), true);
+    assert.equal(foreign.has("named"), true);
+  });
+
+  it("requires the numeric row's own currency", () => {
+    const usdVsArs = keptExpenses([
+      { id: "num", description: "10", bank: "Fiwind", date: "2026-08-18", amountArs: "1500", amountUsd: "10" },
+      { id: "named", description: "Cafe", date: "2026-08-18", amountArs: "1500" },
+    ]);
+    assert.equal(usdVsArs.has("num"), true);
+    const arsVsUsd = keptExpenses([
+      { id: "num", description: "250", bank: "Fiwind", date: "2026-08-18", amountArs: "250" },
+      { id: "named", description: "Cafe", date: "2026-08-18", amountArs: "999", amountUsd: "250" },
+    ]);
+    assert.equal(arsVsUsd.has("num"), true);
+  });
+
+  it("rejects ids that are not safe to inline and leaves an empty set unchanged", () => {
+    assert.equal(expenseSql(), EXPENSE_SQL);
+    assert.equal(expenseSql([]), EXPENSE_SQL);
+    assert.equal(expenseSql(["bad id", "ab'cd", "x".repeat(65)]), EXPENSE_SQL);
+    const sql = expenseSql(["b-id", "a-id", "nope!"]);
+    assert.match(sql, /json_each\('\["a-id","b-id"\]'\)/);
+    assert.equal(sql.includes("nope"), false);
+    assert.equal(sql.includes("DROP"), false);
+  });
 });
+
+function expenseTotal(rows: EchoRow[], userHouseholds?: ReadonlySet<string>): { ars: number; usd: number } {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE transactions (
+      id text,
+      household_id text,
+      date text,
+      description_normalized text,
+      source text,
+      is_payment integer,
+      is_credit integer,
+      linked_transaction_id text,
+      bank text,
+      amount_ars text,
+      amount_usd text
+    );
+  `);
+  const insert = db.prepare(
+    `INSERT INTO transactions (
+       id, household_id, date, description_normalized, source, is_payment, is_credit,
+       linked_transaction_id, bank, amount_ars, amount_usd
+     ) VALUES (?, ?, ?, ?, 'bbva_import', 0, 0, NULL, ?, ?, ?)`,
+  );
+  for (const row of rows) {
+    insert.run(
+      row.id,
+      row.householdId ?? "hh",
+      row.date ?? "2026-08-18",
+      row.description,
+      row.bank ?? null,
+      row.amountArs ?? null,
+      row.amountUsd ?? null,
+    );
+  }
+  const candidates = echoRows(rows);
+  const homes = userHouseholds ?? new Set(candidates.map((row) => row.householdId));
+  const drop = pairFiwindEchoes(candidates, homes);
+  const total = db
+    .prepare(`SELECT SUM(${ARS_EXPR}) AS ars, SUM(${USD_EXPR}) AS usd FROM transactions t WHERE ${expenseSql(drop)}`)
+    .get() as { ars: number | null; usd: number | null };
+  return { ars: total.ars ?? 0, usd: total.usd ?? 0 };
+}
 
 describe("consumosVisibleSql matches the legacy list filter", () => {
   it("hides bank accounting that is not an internal transfer", () => {
@@ -592,6 +629,16 @@ describe("consumosVisibleSql matches the legacy list filter", () => {
       { description: "Resumen", source: "bbva_pdf", visible: false },
       { description: "Devolución de MERPAGO*TEMBICI", isCredit: 1, visible: false },
       { description: "COMPRA MERCADOLIBRE", visible: true },
+      {
+        id: "k60",
+        description:
+          "outgoing transfer (payee unknown) | transferencia inmediata | 100 - banca online | payee not in export",
+        bank: "BBVA",
+        amountArs: "60000",
+        isPayment: 0,
+        isCredit: 0,
+        visible: true,
+      },
     ];
     const db = new DatabaseSync(":memory:");
     db.exec(`
@@ -653,17 +700,177 @@ describe("consumosVisibleSql matches the legacy list filter", () => {
         assert.equal(legacy, row.visible, `${row.description} legacy`);
       }
     }
+    const drop = pairFiwindEchoes(
+      rows.map((row) => ({
+        id: row.id ?? row.description,
+        householdId: "hh",
+        date: row.date ?? "2026-08-18",
+        bank: row.bank ?? null,
+        description: row.description,
+        amountArs: row.amountArs ?? null,
+      })),
+      new Set(["hh"]),
+    );
     const matched = db
       .prepare(
         `SELECT t.description_normalized AS description
          FROM transactions t
          LEFT JOIN categories c ON c.id = t.category_id
-         WHERE ${consumosVisibleSql()}`,
+         WHERE ${consumosVisibleSql(undefined, drop)}`,
       )
       .all() as Array<{ description: string }>;
     const kept = new Set(matched.map((row) => row.description));
     for (const row of rows) {
       assert.equal(kept.has(row.description), row.visible, row.description);
     }
+    assert.equal(kept.has(
+      "outgoing transfer (payee unknown) | transferencia inmediata | 100 - banca online | payee not in export",
+    ), true);
   });
 });
+
+const SIXTY_K =
+  "outgoing transfer (payee unknown) | transferencia inmediata | 100 - banca online | payee not in export";
+
+describe("Fiwind echo loader on the migrated schema", () => {
+  it("uses tx_household_date_idx and does not scan transactions", () => {
+    const db = openMigrated();
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${FIWIND_ECHO_CANDIDATE_SQL}`).all("user-u") as Array<{
+      detail: string;
+    }>;
+    const detail = plan.map((line) => line.detail).join("\n");
+    assert.match(detail, /USING INDEX tx_household_date_idx/);
+    assert.match(detail, /household_id=\? AND date=\?/);
+    assert.doesNotMatch(detail, /SCAN (t|m|n|transactions)\b/);
+  });
+
+  it("drops the mirrored numerics and keeps the 60k expense on Consumos", async () => {
+    const db = openMigrated();
+    seedMembership(db);
+    const fixture: Array<{
+      id: string;
+      householdId: string;
+      date: string;
+      description: string;
+      bank: string;
+      amountArs?: string | null;
+      amountUsd?: string | null;
+    }> = [
+      { id: "num-mirror-1", householdId: "hh-home", date: "2026-08-10", description: "1500", bank: "Fiwind", amountArs: "1500" },
+      { id: "named-mirror-1", householdId: "hh-home", date: "2026-08-10", description: "Almacen", bank: "BBVA", amountArs: "1500" },
+      { id: "num-mirror-2", householdId: "hh-home", date: "2026-08-12", description: "2500.50", bank: "Fiwind", amountArs: "2500.50" },
+      { id: "named-mirror-2", householdId: "hh-home", date: "2026-08-12", description: "Farmacia", bank: "BBVA", amountArs: "2500.50" },
+      { id: "num-mirror-usd", householdId: "hh-home", date: "2026-08-14", description: "15.00", bank: "Fiwind", amountUsd: "15" },
+      { id: "named-mirror-usd", householdId: "hh-home", date: "2026-08-14", description: "Streaming", bank: "BBVA", amountUsd: "15" },
+      { id: "num-solo-1", householdId: "hh-home", date: "2026-08-11", description: "8800", bank: "Fiwind", amountArs: "8800" },
+      { id: "num-solo-2", householdId: "hh-home", date: "2026-08-21", description: "42", bank: "Fiwind", amountArs: "42" },
+      { id: "num-cents", householdId: "hh-home", date: "2026-08-15", description: "0.50", bank: "Fiwind", amountArs: "0.50" },
+      { id: "num-cents-twin", householdId: "hh-home", date: "2026-08-16", description: "18.07", bank: "Fiwind", amountArs: "18.07" },
+      { id: "named-cents", householdId: "hh-home", date: "2026-08-16", description: "Kiosco", bank: "BBVA", amountArs: "18.07" },
+      { id: "num-cross", householdId: "hh-home", date: "2026-08-18", description: "3300", bank: "Fiwind", amountArs: "3300" },
+      { id: "named-cross", householdId: "hh-shared", date: "2026-08-18", description: "Cafe", bank: "BBVA", amountArs: "3300" },
+      { id: "num-foreign", householdId: "hh-home", date: "2026-08-19", description: "7700", bank: "Fiwind", amountArs: "7700" },
+      { id: "named-foreign", householdId: "hh-foreign", date: "2026-08-19", description: "Cafe", bank: "BBVA", amountArs: "7700" },
+      { id: "bbva-60k", householdId: "hh-home", date: "2026-08-20", description: SIXTY_K, bank: "BBVA", amountArs: "60000" },
+    ];
+    const insert = db.prepare(
+      `INSERT INTO transactions (
+         id, household_id, date, description_raw, description_normalized,
+         amount_ars, amount_usd, is_payment, is_credit, external_fingerprint, source, bank
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 'bbva_import', ?)`,
+    );
+    for (const row of fixture) {
+      insert.run(
+        row.id,
+        row.householdId,
+        row.date,
+        row.description,
+        row.description,
+        row.amountArs ?? null,
+        row.amountUsd ?? null,
+        `fp-${row.id}`,
+        row.bank,
+      );
+    }
+    const echoIds = await loadFiwindEchoIds(wrapDb(db), "user-u");
+    assert.deepEqual(echoIds, [
+      "num-cents-twin",
+      "num-cross",
+      "num-mirror-1",
+      "num-mirror-2",
+      "num-mirror-usd",
+    ]);
+    const totals = db
+      .prepare(
+        `SELECT COUNT(*) AS n, SUM(${ARS_EXPR}) AS ars, SUM(${USD_EXPR}) AS usd
+         FROM transactions t
+         WHERE t.household_id IN ('hh-home', 'hh-shared')
+           AND ${expenseSql(echoIds)}`,
+      )
+      .get() as { n: number; ars: number; usd: number };
+    assert.equal(totals.n, 10);
+    assert.equal(Math.round(totals.ars * 100), 8_386_107);
+    assert.equal(Math.round(totals.usd * 1000), 15_000);
+    const visible = db
+      .prepare(
+        `SELECT t.id AS id
+         FROM transactions t
+         LEFT JOIN categories c ON c.id = t.category_id
+         WHERE t.household_id IN ('hh-home', 'hh-shared')
+           AND ${consumosVisibleSql(undefined, echoIds)}`,
+      )
+      .all() as Array<{ id: string }>;
+    const shown = new Set(visible.map((row) => row.id));
+    assert.equal(shown.has("bbva-60k"), true);
+    assert.equal(shown.has("num-solo-1"), true);
+    assert.equal(shown.has("num-cents"), true);
+    assert.equal(shown.has("num-foreign"), true);
+    assert.equal(shown.has("num-cross"), false);
+    assert.equal(shown.has("num-mirror-1"), false);
+    assert.equal(shown.size, 10);
+  });
+});
+
+function openMigrated(): DatabaseSync {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  for (const file of ["0001_app.sql", "0002_auth.sql", "0003_serpix_sync.sql", "0004_card_closed.sql"]) {
+    db.exec(readFileSync(join(root, "migrations", file), "utf8"));
+  }
+  return db;
+}
+
+function seedMembership(db: DatabaseSync) {
+  db.prepare("INSERT INTO users (id, email, name) VALUES ('user-u', 'u@example.com', 'User U')").run();
+  db.prepare("INSERT INTO users (id, email, name) VALUES ('user-v', 'v@example.com', 'User V')").run();
+  db.prepare("INSERT INTO households (id, name, invite_code) VALUES ('hh-home', 'Home', 'codehome1')").run();
+  db.prepare("INSERT INTO households (id, name, invite_code) VALUES ('hh-shared', 'Shared', 'codeshare')").run();
+  db.prepare("INSERT INTO households (id, name, invite_code) VALUES ('hh-foreign', 'Foreign', 'codefore1')").run();
+  db.prepare(
+    "INSERT INTO household_members (household_id, user_id, role) VALUES ('hh-home', 'user-u', 'owner')",
+  ).run();
+  db.prepare(
+    "INSERT INTO household_members (household_id, user_id, role) VALUES ('hh-shared', 'user-u', 'member')",
+  ).run();
+  db.prepare(
+    "INSERT INTO household_members (household_id, user_id, role) VALUES ('hh-foreign', 'user-v', 'owner')",
+  ).run();
+}
+
+function wrapDb(db: DatabaseSync) {
+  return {
+    prepare(sql: string) {
+      let params: unknown[] = [];
+      const stmt = {
+        bind(...values: unknown[]) {
+          params = values;
+          return stmt;
+        },
+        async all<T>() {
+          return { results: db.prepare(sql).all(...(params as never[])) as T[] };
+        },
+      };
+      return stmt;
+    },
+  };
+}

@@ -15,7 +15,8 @@ import { loadFx, monthEndBuy } from "./fx";
 import { activeHousehold, forceSharedOnly } from "./household";
 import { sumIncomeArs } from "./income";
 import { json, num, periodRange, shiftPeriod, todayAr } from "./http";
-import { ARS_EXPR, CLOSED_STATEMENT_SQL, EXPENSE_SQL } from "./sql";
+import { loadFiwindEchoIds } from "./fiwind-dups";
+import { ARS_EXPR, CLOSED_STATEMENT_SQL, expenseSql } from "./sql";
 
 const EVM = /^0x[a-fA-F0-9]{40}$/;
 
@@ -583,6 +584,7 @@ async function monthlyFlow(
     ? "t.ownership = 'shared'"
     : "(t.ownership = 'shared' OR t.paid_by_user_id = ?)";
   const visibilityBinds = sharedOnly ? [] : [userId];
+  const echoIds = await loadFiwindEchoIds(env.DB, userId);
   const [expenses, incomes] = await Promise.all([
     env.DB.prepare(
       `SELECT substr(t.date, 1, 7) AS month, SUM(${ARS_EXPR}) AS ars
@@ -590,7 +592,7 @@ async function monthlyFlow(
        WHERE t.household_id = ?
          AND t.date >= ?
          AND t.date < ?
-         AND ${EXPENSE_SQL}
+         AND ${expenseSql(echoIds)}
          AND ${visibility}
        GROUP BY month`,
     )
