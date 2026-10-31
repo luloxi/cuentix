@@ -110,7 +110,7 @@ export async function handlePatrimonio(req: Request, env: Env, user: SessionUser
 
 export async function handlePatrimonioSnapshot(req: Request, env: Env, user: SessionUser): Promise<Response> {
   if (req.method !== "POST") return json({ error: "Método no permitido" }, 405);
-  const snapshot = await captureUserSnapshot(env, user.id);
+  const snapshot = await captureUserSnapshot(env, user.id, undefined, "force");
   const payload = await patrimonioPayload(req, env, user.id);
   return json({ ...payload, snapshot });
 }
@@ -272,6 +272,17 @@ const FLOW_MONTHS = 24;
 
 export type SnapshotOutcome = "missing_fx" | "unchanged" | "written";
 
+/**
+ * How today's patrimonio row is written.
+ * - cron: insert only when that user has no row today. Never update.
+ * - change: upsert when the asset or debt amounts differ. A blue move or a
+ *   net-worth move alone does not write. `assets_ars` is stored already
+ *   marked to blue, so the peso leg is compared after removing that mark
+ *   and USD balances are compared in dollars.
+ * - force: always upsert today's row at the current blue.
+ */
+export type SnapshotMode = "cron" | "change" | "force";
+
 type LivePosition = {
   assetsArs: number;
   assetsUsd: number;
@@ -299,7 +310,7 @@ export type FlowPoint = {
   flowArs: number;
 };
 
-/** Cron entry. One failure stays inside this function. */
+/** Cron entry. One failure stays inside this function. Does not rewrite today's row. */
 export async function captureDailySnapshots(
   env: Env,
   fxRate?: number | null,
@@ -317,7 +328,7 @@ export async function captureDailySnapshots(
   let unchanged = 0;
   for (const userId of userIds) {
     try {
-      const outcome = await captureUserSnapshot(env, userId, rate);
+      const outcome = await captureUserSnapshot(env, userId, rate, "cron");
       if (outcome === "written") written += 1;
       else if (outcome === "unchanged") unchanged += 1;
     } catch (err) {
@@ -327,38 +338,75 @@ export async function captureDailySnapshots(
   return { written, unchanged, missingFx: false };
 }
 
-/** Upsert today's row. Skips the write when blue is missing or the numbers match. */
+/**
+ * Write today's snapshot. Never writes without a usable blue rate.
+ * Default mode is `change` (savings and debt saves).
+ */
 export async function captureUserSnapshot(
   env: Env,
   userId: string,
   fxRate?: number | null,
+  mode: SnapshotMode = "change",
 ): Promise<SnapshotOutcome> {
   const rate = await resolveFx(fxRate);
   if (rate == null) return "missing_fx";
+  const date = todayAr();
+  if (mode === "cron") {
+    const existing = await env.DB.prepare(
+      `SELECT 1 AS ok FROM patrimonio_snapshots WHERE user_id = ? AND date = ?`,
+    )
+      .bind(userId, date)
+      .first<{ ok: number }>();
+    if (existing) return "unchanged";
+  }
   const position = await livePosition(env, userId, rate);
   if (position.netWorthArs == null) return "missing_fx";
-  const date = todayAr();
   const next = snapshotTexts({ ...position, netWorthArs: position.netWorthArs, fxRate: rate });
-  const existing = await env.DB.prepare(
-    `SELECT assets_ars, assets_usd, debt_ars, debt_usd, net_worth_ars, fx_rate
-     FROM patrimonio_snapshots
-     WHERE user_id = ? AND date = ?`,
-  )
-    .bind(userId, date)
-    .first<StoredSnapshot>();
-  if (existing && sameSnapshot(existing, next)) return "unchanged";
-  await env.DB.prepare(
-    `INSERT INTO patrimonio_snapshots (
-       id, user_id, date, assets_ars, assets_usd, debt_ars, debt_usd, net_worth_ars, fx_rate, source, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'snapshot', ?)
-     ON CONFLICT(user_id, date) DO UPDATE SET
+  if (mode === "change") {
+    const existing = await env.DB.prepare(
+      `SELECT assets_ars, assets_usd, debt_ars, debt_usd, net_worth_ars, fx_rate
+       FROM patrimonio_snapshots
+       WHERE user_id = ? AND date = ?`,
+    )
+      .bind(userId, date)
+      .first<StoredSnapshot>();
+    if (existing && samePosition(existing, next)) return "unchanged";
+  }
+  const changes = await writeSnapshot(env, userId, date, next, mode === "cron" ? "nothing" : "update");
+  if (mode === "cron" && changes === 0) return "unchanged";
+  return "written";
+}
+
+async function rememberSnapshot(env: Env, userId: string): Promise<void> {
+  try {
+    await captureUserSnapshot(env, userId, undefined, "change");
+  } catch (err) {
+    console.error("patrimonio snapshot failed", err instanceof Error ? err.message : "error");
+  }
+}
+
+async function writeSnapshot(
+  env: Env,
+  userId: string,
+  date: string,
+  next: ReturnType<typeof snapshotTexts>,
+  conflict: "nothing" | "update",
+): Promise<number> {
+  const update = conflict === "update"
+    ? `ON CONFLICT(user_id, date) DO UPDATE SET
        assets_ars = excluded.assets_ars,
        assets_usd = excluded.assets_usd,
        debt_ars = excluded.debt_ars,
        debt_usd = excluded.debt_usd,
        net_worth_ars = excluded.net_worth_ars,
        fx_rate = excluded.fx_rate,
-       source = excluded.source`,
+       source = excluded.source`
+    : `ON CONFLICT(user_id, date) DO NOTHING`;
+  const result = await env.DB.prepare(
+    `INSERT INTO patrimonio_snapshots (
+       id, user_id, date, assets_ars, assets_usd, debt_ars, debt_usd, net_worth_ars, fx_rate, source, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'snapshot', ?)
+     ${update}`,
   )
     .bind(
       crypto.randomUUID(),
@@ -373,15 +421,7 @@ export async function captureUserSnapshot(
       Date.now(),
     )
     .run();
-  return "written";
-}
-
-async function rememberSnapshot(env: Env, userId: string): Promise<void> {
-  try {
-    await captureUserSnapshot(env, userId);
-  } catch (err) {
-    console.error("patrimonio snapshot failed", err instanceof Error ? err.message : "error");
-  }
+  return result.meta?.changes ?? 1;
 }
 
 async function resolveFx(fxRate?: number | null): Promise<number | null> {
@@ -508,16 +548,21 @@ function snapshotTexts(position: LivePosition & { netWorthArs: number; fxRate: n
   };
 }
 
-function sameSnapshot(
+/** True when savings and debt amounts match, ignoring the blue mark and net worth. */
+function samePosition(
   row: StoredSnapshot,
   next: ReturnType<typeof snapshotTexts>,
 ): boolean {
-  return row.assets_ars === next.assets_ars
-    && row.assets_usd === next.assets_usd
+  return row.assets_usd === next.assets_usd
     && row.debt_ars === next.debt_ars
     && row.debt_usd === next.debt_usd
-    && row.net_worth_ars === next.net_worth_ars
-    && (row.fx_rate ?? null) === (next.fx_rate ?? null);
+    && rawArsCents(row.assets_ars, row.assets_usd, row.fx_rate)
+      === rawArsCents(next.assets_ars, next.assets_usd, next.fx_rate);
+}
+
+function rawArsCents(assetsArs: string, assetsUsd: string, fxRate: string | null): number {
+  const fx = fxRate == null || fxRate === "" ? 0 : num(fxRate);
+  return Math.round((num(assetsArs) - num(assetsUsd) * fx) * 100);
 }
 
 async function monthlyFlow(

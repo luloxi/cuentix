@@ -61,6 +61,11 @@ export function isOwnFxConversionDescription(description: string): boolean {
  * BBVA CR TRF / CR TBE / INM COE credit tickets, same-CUIT self transfers,
  * BBNK self, and own FX (Cambio de moneda).
  *
+ * Income-side classification only. Expense totals use `BANK_ACCOUNTING_SQL`,
+ * which counts "Transferencia inmediata" and a bare "TRANSFERENCIA" as spends
+ * unless a stricter own-account phrase matches. This function still treats
+ * both as internal so they stay out of Ingresos.
+ *
  * Rainman: money already yours changing pockets ≠ income.
  * Optional `holderCuit` (11 digits): CUIT in the memo matching the titular → interno.
  * BBVA credit-transfer tickets (CR TRF / CR TBE / INM COE) → Transferencia interna.
@@ -213,6 +218,12 @@ export function isTransferenciaInternaTipo(
  * wallet TRANSFERENCIA ARS, own-account “cuenta tuya”, FX, and amount-only Tipo.
  * They must not inflate “gastos” totals in Análisis / Consumos.
  * COMPRA SUPER ARS is grocery spend, not an investment.
+ * Amount-only tipos are always accounting here. SQL (`worker/sql.ts`) applies
+ * the Ockham rule instead: a Fiwind numeric row counts unless a named row
+ * (expense or not) of the same amount wins the 1:1 pairing. The Fiwind
+ * row itself is only ever dropped. "Transferencia inmediata" and bare
+ * "TRANSFERENCIA" stay accounting here via the income-side detector and count
+ * as spends in SQL.
  */
 export function isBankAccountingEntry(description: string): boolean {
   if (isOwnAccountTransferDescription(description)) return true;

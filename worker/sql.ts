@@ -10,34 +10,133 @@
  * - Casita rows linked to Invoice IOG are excluded; invoice_iog itself counts
  * - `BANK_ACCOUNTING_SQL` keeps the phrase list (cuenta tuya, cambio de
  *   moneda, pesificación, transf deuda, compra/venta KO, COMPRA/VENTA ME,
- *   RETIRO, DEPOSITO, CONVERSION, yields, bare TRANSFERENCIA).
+ *   RETIRO, DEPOSITO, CONVERSION, yields).
  *   Wallet rows are only the exact codes TRANSFERENCIA ARS|USD|USDC|USDT.
  *   COMPRA/VENTA of a single wallet code are only USD, USDC, USDT, USDB, ME
  *   (KO stays on the existing LIKE). COMPRA SUPER, COMPRA MERCADOLIBRE and
  *   TRANSFERENCIA A <persona> stay spends.
+ *   "Transferencia inmediata" and a bare "TRANSFERENCIA" stay spends too.
+ *   They are not an own-account pattern here. Income-side JS
+ *   (`isOwnAccountTransferDescription`) still treats both as internal so
+ *   they stay out of Ingresos. That split is intentional.
  *   A numeric-only description (digits and dots) is accounting only as a
- *   Fiwind echo: bank = 'Fiwind' and another non-numeric row in the same
- *   household within 2 days (`julianday`) shares the ARS amount (abs diff
- *   < 0.01) or the USD amount (abs diff < 0.005). The amount compared has to
- *   be non-zero so two empty amounts do not count as an echo. Unpaired
- *   numeric rows stay counted. JS `isBankAccountingEntry` still treats every
- *   amount-only tipo as accounting; that difference is intentional.
- *   The echo lookup filters `echo.household_id` plus a sargable date window,
- *   which uses `tx_household_date_idx` from migration 0001. No extra index.
+ *   Fiwind echo under the Ockham rule below. Unpaired numeric rows stay
+ *   counted. JS `isBankAccountingEntry` still treats every amount-only tipo
+ *   as accounting; that difference is intentional.
+ *
+ * Ockham rule: a Fiwind row t whose description is only digits and dots is
+ * a duplicate when a named twin of the same amount takes its slot.
+ * A named twin is any other non-numeric row: a different id, the same
+ * household (never another household), any bank or source, expense or not
+ * (a payment or a credit counts), and a description that is not
+ * numeric-only. The twin does not have to pass the phrase list; this
+ * expression does not call itself. Amounts match when |ARS| differs by
+ * less than 0.01 and t's ARS absolute value is at least 0.01, or |USD|
+ * differs by less than 0.005 and t's USD absolute value is at least 0.005.
+ * Two empty amounts do not match.
+ * Pairing is 1:1. Same calendar day first: that day's Fiwind numeric rows
+ * of this amount are ordered by id, and t is dropped when the number with
+ * a smaller id is less than the number of named twins that day. Otherwise
+ * t is residual. Inside t's ±2 day window (sargable `date` range on
+ * `tx_household_date_idx`, plus `julianday` <= 2, which already includes
+ * the same day), leftover named twins on a day are max(0, named − numeric)
+ * and leftover numerics are the ones not taken that day. Residuals are
+ * ordered by (date, id). t is dropped when the number of residual numerics
+ * strictly before it is less than the leftover named twins in the window.
+ * Two numeric rows and no named twin both count. The twin is any named
+ * row, expense or not. The Fiwind row itself is only ever dropped, never
+ * double counted: this rule does not remove the twin or count t twice.
+ * The ±2 day pass is greedy and approximate: each numeric row uses its own
+ * window, so one leftover named twin near the edge can cancel two residuals
+ * whose windows both contain it and do not contain each other. The
+ * aggregate runs only after `bank = 'Fiwind'` and the numeric-description
+ * check, so other rows short-circuit.
  *
  * Consumos shows real spends plus internal transfers and the payment
  * exceptions in `isConsumosHiddenPayment`. Other bank-accounting lines
  * (paired numeric Fiwind echos, pesificación, Retiro) stay out of the list.
  * Unpaired numeric descriptions stay visible, unlike the legacy JS filter.
+ * "Transferencia inmediata" and bare "TRANSFERENCIA" are spends, so they
+ * stay on the list.
  */
 
 /** Digits and dots only, so "59900" and "449536.14" match and "Pago a DIA" does not. */
 function numericDescriptionSql(alias: string): string {
+  // IFNULL so a null description is false, not NULL, and AND can short-circuit.
   return `(
-    upper(trim(${alias}.description_normalized)) GLOB '[0-9]*'
-    AND upper(trim(${alias}.description_normalized)) NOT GLOB '*[^0-9.]*'
+    upper(trim(IFNULL(${alias}.description_normalized, ''))) GLOB '[0-9]*'
+    AND upper(trim(IFNULL(${alias}.description_normalized, ''))) NOT GLOB '*[^0-9.]*'
   )`;
 }
+
+/** Same non-zero ARS (< 0.01) or USD (< 0.005) amount as `a`. Empty does not match. */
+function amountCloseSql(a: string, b: string): string {
+  return `(
+    (
+      abs(CAST(IFNULL(${a}.amount_ars, '0') AS REAL)) >= 0.01
+      AND abs(
+        CAST(IFNULL(${b}.amount_ars, '0') AS REAL)
+        - CAST(IFNULL(${a}.amount_ars, '0') AS REAL)
+      ) < 0.01
+    )
+    OR (
+      abs(CAST(IFNULL(${a}.amount_usd, '0') AS REAL)) >= 0.005
+      AND abs(
+        CAST(IFNULL(${b}.amount_usd, '0') AS REAL)
+        - CAST(IFNULL(${a}.amount_usd, '0') AS REAL)
+      ) < 0.005
+    )
+  )`;
+}
+
+/**
+ * 1:1 Ockham echo. Same-day id order first, then residual ±2 days by (date, id).
+ * One index range scan per Fiwind numeric row (`tx_household_date_idx`).
+ */
+const FIWIND_NUMERIC_ECHO_SQL = `(
+  IFNULL(t.bank, '') = 'Fiwind'
+  AND ${numericDescriptionSql("t")}
+  AND (
+    SELECT CASE
+      WHEN IFNULL(SUM(CASE WHEN d = t.date THEN nums_before ELSE 0 END), 0)
+         < IFNULL(SUM(CASE WHEN d = t.date THEN nameds ELSE 0 END), 0)
+      THEN 1
+      WHEN IFNULL(SUM(
+             CASE
+               WHEN d < t.date THEN MAX(nums - nameds, 0)
+               WHEN d = t.date THEN MAX(nums_before - nameds, 0)
+               ELSE 0
+             END
+           ), 0)
+         < IFNULL(SUM(MAX(nameds - nums, 0)), 0)
+      THEN 1
+      ELSE 0
+    END
+    FROM (
+      SELECT
+        echo.date AS d,
+        SUM(CASE
+          WHEN IFNULL(echo.bank, '') = 'Fiwind' AND ${numericDescriptionSql("echo")}
+          THEN 1 ELSE 0 END) AS nums,
+        SUM(CASE
+          WHEN IFNULL(echo.bank, '') = 'Fiwind'
+           AND ${numericDescriptionSql("echo")}
+           AND echo.id < t.id
+          THEN 1 ELSE 0 END) AS nums_before,
+        SUM(CASE
+          WHEN echo.id <> t.id
+           AND NOT ${numericDescriptionSql("echo")}
+          THEN 1 ELSE 0 END) AS nameds
+      FROM transactions echo
+      WHERE echo.household_id = t.household_id
+        AND echo.date >= date(t.date, '-2 days')
+        AND echo.date <= date(t.date, '+2 days')
+        AND abs(julianday(echo.date) - julianday(t.date)) <= 2
+        AND ${amountCloseSql("t", "echo")}
+      GROUP BY echo.date
+    )
+  ) = 1
+)`;
 
 /** True when the description is bank accounting (not a household spend). */
 export const BANK_ACCOUNTING_SQL = `(
@@ -54,7 +153,6 @@ export const BANK_ACCOUNTING_SQL = `(
   OR upper(t.description_normalized) LIKE '%CREDITO VS EN USD%'
   OR upper(t.description_normalized) LIKE '%COMPRA KO%'
   OR upper(t.description_normalized) LIKE '%VENTA KO%'
-  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA INMEDIATA%'
   OR upper(t.description_normalized) LIKE '%TRANSFERENCIA INTERNA%'
   OR upper(t.description_normalized) LIKE '%CUENTA A CUENTA%'
   OR upper(t.description_normalized) LIKE '%CTA A CTA%'
@@ -82,7 +180,6 @@ export const BANK_ACCOUNTING_SQL = `(
   OR upper(trim(t.description_normalized)) GLOB 'CONVERSION*'
   OR upper(trim(t.description_normalized)) GLOB 'GANANCIA*'
   OR upper(trim(t.description_normalized)) GLOB 'RENDIMIENTO*'
-  OR upper(trim(t.description_normalized)) = 'TRANSFERENCIA'
   OR upper(trim(t.description_normalized)) IN (
     'TRANSFERENCIA ARS',
     'TRANSFERENCIA USD',
@@ -93,47 +190,21 @@ export const BANK_ACCOUNTING_SQL = `(
     'COMPRA USD', 'COMPRA USDC', 'COMPRA USDT', 'COMPRA USDB',
     'VENTA USD', 'VENTA USDC', 'VENTA USDT', 'VENTA USDB'
   )
-  OR (
-    t.bank = 'Fiwind'
-    AND ${numericDescriptionSql("t")}
-    AND EXISTS (
-      SELECT 1 FROM transactions echo
-      WHERE echo.household_id = t.household_id
-        AND echo.id <> t.id
-        AND echo.date >= date(t.date, '-2 days')
-        AND echo.date <= date(t.date, '+2 days')
-        AND abs(julianday(echo.date) - julianday(t.date)) <= 2
-        AND NOT ${numericDescriptionSql("echo")}
-        AND (
-          (
-            abs(CAST(IFNULL(t.amount_ars, '0') AS REAL)) >= 0.01
-            AND abs(
-              CAST(IFNULL(echo.amount_ars, '0') AS REAL)
-              - CAST(IFNULL(t.amount_ars, '0') AS REAL)
-            ) < 0.01
-          )
-          OR (
-            abs(CAST(IFNULL(t.amount_usd, '0') AS REAL)) >= 0.005
-            AND abs(
-              CAST(IFNULL(echo.amount_usd, '0') AS REAL)
-              - CAST(IFNULL(t.amount_usd, '0') AS REAL)
-            ) < 0.005
-          )
-        )
-    )
-  )
+  OR ${FIWIND_NUMERIC_ECHO_SQL}
 )`;
 
 /**
  * Internal transfers stay on the Consumos list (out of the expense total).
  * Requires the categories join (`c`).
+ * "Transferencia inmediata" and bare "TRANSFERENCIA" are spends, so they
+ * are not listed here. Consumos still shows them because they fall outside
+ * `BANK_ACCOUNTING_SQL`.
  */
 export const INTERNAL_VISIBLE_SQL = `(
   IFNULL(c.slug, '') = 'transferencia-interna'
   OR upper(t.description_normalized) LIKE '%CUENTA TUYA%'
   OR upper(t.description_normalized) LIKE '%CUENTA PROPIA%'
   OR upper(t.description_normalized) LIKE '%ENTRE CUENTAS%'
-  OR upper(t.description_normalized) LIKE '%TRANSFERENCIA INMEDIATA%'
   OR upper(t.description_normalized) LIKE '%TRANSFERENCIA INTERNA%'
   OR upper(t.description_normalized) LIKE '%CUENTA A CUENTA%'
   OR upper(t.description_normalized) LIKE '%CTA A CTA%'
@@ -157,7 +228,6 @@ export const INTERNAL_VISIBLE_SQL = `(
   OR upper(trim(t.description_normalized)) GLOB 'VENTA ME *'
   OR upper(trim(t.description_normalized)) GLOB '* VENTA ME'
   OR upper(trim(t.description_normalized)) GLOB '* VENTA ME *'
-  OR upper(trim(t.description_normalized)) = 'TRANSFERENCIA'
   OR (
     upper(t.description_normalized) LIKE '%TRANSF%CLIENTE%'
     AND (
