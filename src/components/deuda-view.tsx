@@ -66,6 +66,20 @@ type DebtSettings = {
   saldoDeudaUsd?: number | null;
 };
 
+type PastStatement = {
+  id: string;
+  fileName: string | null;
+  source: string;
+  closedAt: string | null;
+};
+
+type PastCuota = {
+  date: string;
+  description: string;
+  installment: string | null;
+  amountArs: number | null;
+};
+
 type DebtTab = "evolucion" | "pagos";
 
 function tabFromParam(raw: string | null): DebtTab {
@@ -169,6 +183,9 @@ export function DeudaView() {
   const [saldoUsdInput, setSaldoUsdInput] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
+  const [statements, setStatements] = useState<PastStatement[]>([]);
+  const [pastCuotas, setPastCuotas] = useState<PastCuota[]>([]);
+  const [cardStatus, setCardStatus] = useState<string | null>(null);
 
   useEffect(() => {
     setTab(tabFromParam(searchParams.get("tab")));
@@ -196,6 +213,9 @@ export function DeudaView() {
       setOpenInstallments(data.openInstallments ?? []);
       setOpenCharges(data.openCharges ?? []);
       setSummary(data.summary ?? null);
+      setStatements(data.statements ?? []);
+      setPastCuotas(data.pastInstallments ?? []);
+      setCardStatus(data.cardStatus ?? null);
       if (setRes.ok && setData.settings) {
         const s = setData.settings as DebtSettings;
         setSettings(s);
@@ -304,12 +324,17 @@ export function DeudaView() {
   const interestEst = estimateMonthlyInterest(balance, settings.ratePct);
   const dueLabel = nextDueLabel(settings.dueDay);
 
+  const noCard =
+    cardStatus === "sin_tarjeta_activa" ||
+    (settled && !summary?.primaryCardLast4 && balance === 0);
   const heroLabel = settled ? "Estado" : "Deuda";
-  const heroValue = settled
-    ? "Saldada"
-    : !hasSaldo || mode === "empty"
-      ? "Sin snapshot"
-      : formatArs(balance);
+  const heroValue = noCard
+    ? "Sin deuda"
+    : settled
+      ? "Saldada"
+      : !hasSaldo || mode === "empty"
+        ? "Sin snapshot"
+        : formatArs(balance);
   const heroTone: "neutral" | "brand" | "danger" = settled
     ? "brand"
     : !hasSaldo || mode === "empty"
@@ -320,10 +345,13 @@ export function DeudaView() {
     <div className="space-y-3">
       <Surface className="space-y-3 !p-4">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight">Tu tarjeta</h2>
+          <h2 className="text-sm font-semibold tracking-tight">
+            {noCard ? "Sin tarjeta activa" : "Tu tarjeta"}
+          </h2>
           <p className="text-[11px] text-zinc-500">
-            El saldo de deuda lo cargás vos (o el resumen de tarjeta). No
-            inventamos números desde la cuenta corriente.
+            {noCard
+              ? "La deuda está en cero. Los resúmenes viejos quedan en el historial."
+              : "El saldo de deuda lo cargás vos (o el resumen de tarjeta). No inventamos números desde la cuenta corriente."}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -479,11 +507,49 @@ export function DeudaView() {
         </p>
       )}
 
+      {(statements.length > 0 || pastCuotas.length > 0) && (
+        <details className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+            Historial de resúmenes y cuotas
+          </summary>
+          <div className="space-y-3 px-4 pb-4 text-xs text-zinc-600 dark:text-zinc-300">
+            <p>Estos datos quedan guardados. No suman deuda activa.</p>
+            {statements.length > 0 && (
+              <ul className="space-y-1">
+                {statements.map((row) => (
+                  <li key={row.id} className="flex justify-between gap-3">
+                    <span className="min-w-0 truncate">{row.fileName || row.source}</span>
+                    <span className="shrink-0 text-zinc-500">cerrado</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {pastCuotas.length > 0 && (
+              <ul className="space-y-1">
+                {pastCuotas.map((row, index) => (
+                  <li key={`${row.date}-${index}`} className="flex justify-between gap-3">
+                    <span className="min-w-0 truncate">
+                      {formatDateAr(row.date)} · {row.description}
+                      {row.installment ? ` · ${row.installment}` : ""}
+                    </span>
+                    <span className="shrink-0 tabular-nums">
+                      {row.amountArs != null ? formatArs(row.amountArs) : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+      )}
+
       {tab === "evolucion" ? (
         <div className="space-y-3">
           {forced && (
             <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100">
-              Marcaste la deuda como saldada. Casita y este número quedan en 0.
+              {noCard
+                ? "Sin deuda y sin tarjeta activa. El historial queda guardado."
+                : "Marcaste la deuda como saldada. La tarjeta y este número quedan en 0."}
             </p>
           )}
 

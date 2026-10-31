@@ -86,6 +86,7 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
     sharedPrevTotalArs,
     debtBalanceArs: debt.balance,
     debtSettled: debt.settled,
+    debtActiveCard: debt.activeCard,
     monthTxCount: curOwn.n,
     categorySummary: ranked,
     householdServices: SERVICES.map((svc) => ({
@@ -209,7 +210,7 @@ async function savingsTotals(env: Env, userId: string) {
 
 async function debtSnapshot(env: Env, userId: string) {
   const row = await env.DB.prepare(
-    `SELECT force_settled, saldo_deuda_ars, saldo_deuda_usd
+    `SELECT force_settled, saldo_deuda_ars, saldo_deuda_usd, card_last4
      FROM debt_settings WHERE user_id = ?`,
   )
     .bind(userId)
@@ -217,14 +218,21 @@ async function debtSnapshot(env: Env, userId: string) {
       force_settled: number | null;
       saldo_deuda_ars: string | null;
       saldo_deuda_usd: string | null;
+      card_last4: string | null;
     }>();
-  if (!row) return { balance: 0, settled: false };
-  if (row.force_settled) return { balance: 0, settled: true };
+  if (!row) return { balance: 0, settled: false, activeCard: false };
+  if (row.force_settled) return { balance: 0, settled: true, activeCard: false };
   if (row.saldo_deuda_ars == null && row.saldo_deuda_usd == null) {
-    return { balance: 0, settled: false };
+    return { balance: 0, settled: false, activeCard: false };
   }
   const balance = Math.abs(num(row.saldo_deuda_ars));
-  return { balance, settled: balance < 50 };
+  const usd = Math.abs(num(row.saldo_deuda_usd));
+  const settled = balance < 50 && usd < 0.01;
+  return {
+    balance: settled ? 0 : balance,
+    settled,
+    activeCard: Boolean(row.card_last4) && !settled,
+  };
 }
 
 async function incomeRows(env: Env, userId: string) {

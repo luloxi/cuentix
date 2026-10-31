@@ -1,0 +1,146 @@
+/**
+ * Patrimonio series helpers. History is only what was stored.
+ * The BBVA card ledger is incomplete (see INCOMPLETE_LEDGER_ARS in debt.ts),
+ * so no month is backfilled as source "derived".
+ */
+
+export type PatrimonioSource = "snapshot" | "derived" | "manual";
+
+export type PatrimonioPoint = {
+  date: string;
+  assetsArs: number;
+  assetsUsd: number;
+  debtArs: number;
+  debtUsd: number;
+  netWorthArs: number;
+  fxRate: number | null;
+  source: PatrimonioSource;
+};
+
+export type SeriesRange = "6m" | "1y" | "all";
+
+export type DebtReading = {
+  balanceArs: number;
+  balanceUsd: number;
+  settled: boolean;
+  forceSettled: boolean;
+  activeCard: boolean;
+  /** Shown when the balance is zero and there is no active card. */
+  cardStatus: "sin_tarjeta_activa" | "activa" | "sin_snapshot";
+};
+
+/** No historical month is trusted. Incomplete card imports invent millions. */
+export const TRUSTED_DEBT_MONTHS: readonly string[] = [];
+
+export function assetsEquivalent(input: {
+  bankArs: number;
+  bankUsd: number;
+  walletUsd: number;
+  fxRate: number | null;
+}): { assetsArs: number; assetsUsd: number } {
+  const bankArs = finite(input.bankArs);
+  const bankUsd = finite(input.bankUsd);
+  const walletUsd = finite(input.walletUsd);
+  const assetsUsd = bankUsd + walletUsd;
+  const rate = positiveRate(input.fxRate);
+  return { assetsUsd, assetsArs: bankArs + assetsUsd * rate };
+}
+
+export function netWorthArs(assetsArs: number, debtArs: number): number {
+  return finite(assetsArs) - finite(debtArs);
+}
+
+/**
+ * Current debt for the lite screens. A forced settle, or a stored saldo of
+ * zero with no card last4, is "sin tarjeta activa" and balance 0.
+ * A null saldo is not settled: there is no snapshot yet.
+ */
+export function readDebt(input: {
+  forceSettled: boolean;
+  saldoArs: number | null;
+  saldoUsd: number | null;
+  cardLast4: string | null;
+}): DebtReading {
+  if (input.forceSettled) {
+    return {
+      balanceArs: 0,
+      balanceUsd: 0,
+      settled: true,
+      forceSettled: true,
+      activeCard: false,
+      cardStatus: "sin_tarjeta_activa",
+    };
+  }
+  if (input.saldoArs == null && input.saldoUsd == null) {
+    return {
+      balanceArs: 0,
+      balanceUsd: 0,
+      settled: false,
+      forceSettled: false,
+      activeCard: false,
+      cardStatus: "sin_snapshot",
+    };
+  }
+  const ars = Math.abs(finite(input.saldoArs));
+  const usd = Math.abs(finite(input.saldoUsd));
+  const settled = ars < 50 && usd < 0.01;
+  const noCard = settled && !input.cardLast4;
+  return {
+    balanceArs: settled ? 0 : ars,
+    balanceUsd: settled ? 0 : usd,
+    settled,
+    forceSettled: false,
+    activeCard: Boolean(input.cardLast4) && !settled,
+    cardStatus: noCard ? "sin_tarjeta_activa" : input.cardLast4 ? "activa" : "sin_snapshot",
+  };
+}
+
+export function filterPatrimonioSeries(
+  points: PatrimonioPoint[],
+  range: SeriesRange,
+  today: string,
+): PatrimonioPoint[] {
+  const sorted = [...points].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (range === "all") return sorted;
+  const months = range === "6m" ? 6 : 12;
+  const start = shiftYmd(monthStart(today), -(months - 1));
+  return sorted.filter((point) => point.date >= start && point.date <= today);
+}
+
+export function historyStartsAt(points: PatrimonioPoint[]): string | null {
+  if (points.length === 0) return null;
+  return [...points].sort((a, b) => (a.date < b.date ? -1 : 1))[0].date;
+}
+
+/** Spanish note. No em dash. */
+export function historyNote(firstDate: string | null): string {
+  if (!firstDate) {
+    return "Todavía no hay puntos. Abrí esta pantalla para guardar el de hoy.";
+  }
+  const [year, month, day] = firstDate.split("-");
+  return `El historial arranca el ${day}/${month}/${year}. Cada visita suma un punto.`;
+}
+
+function finite(value: number | null | undefined): number {
+  return value != null && Number.isFinite(value) ? value : 0;
+}
+
+function positiveRate(value: number | null | undefined): number {
+  return value != null && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function monthStart(ymd: string): string {
+  const match = /^(\d{4})-(\d{2})/.exec(ymd);
+  if (!match) return ymd;
+  return `${match[1]}-${match[2]}-01`;
+}
+
+function shiftYmd(ymd: string, months: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!match) return ymd;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1 + months, Number(match[3])));
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}

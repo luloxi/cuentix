@@ -123,6 +123,21 @@ export function shiftPeriod(period: string, delta: number): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Current YYYY-MM-DD in Argentina. Calendar date, no UTC shift. */
+export function todayAr(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  if (year && month && day) return `${year}-${month}-${day}`;
+  return now.toISOString().slice(0, 10);
+}
+
 /** Current YYYY-MM in Argentina. */
 export function currentPeriodAr(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
