@@ -527,7 +527,12 @@ function HomeLayoutEditor({
           );
         })}
       </ul>
-
+      <Link
+        href="/suscripcion"
+        className="mt-3 inline-flex text-[11px] font-medium text-[var(--muted-fg)] underline-offset-2 hover:text-[var(--foreground)] hover:underline"
+      >
+        Plan y suscripción
+      </Link>
     </div>
   );
 }

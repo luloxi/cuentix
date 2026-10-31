@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  bumpOccurrenceFingerprint,
   expenseAmountText,
   isCalendarDate,
   manualFingerprintMaterial,
+  manualOccurrenceMaterial,
+  nextOccurrenceFingerprint,
+  occurrenceFingerprint,
   parseExpenseAmount,
 } from "./manual-expense";
 
@@ -48,5 +52,37 @@ describe("manual expense validation", () => {
     });
     assert.equal(a, b);
     assert.equal(a.includes("Date"), false);
+  });
+
+  it("suffixes later copies and leaves the first material unchanged", () => {
+    const material = manualFingerprintMaterial({
+      householdId: "hh",
+      date: "2026-09-01",
+      description: "Café",
+      amountArs: "10.00",
+      amountUsd: null,
+    });
+    assert.equal(manualOccurrenceMaterial(material, 1), material);
+    assert.equal(manualOccurrenceMaterial(material, 2), `${material}#2`);
+    assert.equal(manualOccurrenceMaterial(material, 3), `${material}#3`);
+    assert.equal(occurrenceFingerprint("abc123", 1), "abc123");
+    assert.equal(occurrenceFingerprint("abc123", 2), "abc123#2");
+
+    const first = nextOccurrenceFingerprint("abc123", []);
+    assert.equal(first.fingerprint, "abc123");
+    assert.equal(first.possibleDuplicate, false);
+
+    const second = nextOccurrenceFingerprint("abc123", ["abc123"]);
+    assert.equal(second.fingerprint, "abc123#2");
+    assert.equal(second.occurrence, 2);
+    assert.equal(second.possibleDuplicate, true);
+
+    const third = nextOccurrenceFingerprint("abc123", ["abc123", "abc123#2"]);
+    assert.equal(third.fingerprint, "abc123#3");
+
+    const gap = nextOccurrenceFingerprint("abc123", ["abc123", "abc123#2", "abc123#4"]);
+    assert.equal(gap.fingerprint, "abc123#5");
+    assert.equal(bumpOccurrenceFingerprint("abc123", "abc123"), "abc123#2");
+    assert.equal(bumpOccurrenceFingerprint("abc123", "abc123#2"), "abc123#3");
   });
 });

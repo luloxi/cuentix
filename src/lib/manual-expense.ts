@@ -63,3 +63,70 @@ export function manualFingerprintMaterial(input: {
     input.amountUsd ?? "",
   ].join("|");
 }
+
+/**
+ * Occurrence 1 is the material hashed for the first insert (prod rows depend
+ * on that exact string). Later copies of the same expense append `#2`, `#3`, …
+ */
+export function manualOccurrenceMaterial(material: string, occurrence: number): string {
+  if (occurrence <= 1) return material;
+  return `${material}#${occurrence}`;
+}
+
+/**
+ * Stored fingerprint. The first copy is the 32-char hash of the base material.
+ * The next copies keep that hash and append `#2`, `#3`, so the family can be
+ * counted without changing the hash of rows already in prod.
+ */
+export function occurrenceFingerprint(baseFingerprint: string, occurrence: number): string {
+  if (occurrence <= 1) return baseFingerprint;
+  return `${baseFingerprint}#${occurrence}`;
+}
+
+export function occurrenceOfFingerprint(
+  fingerprint: string,
+  baseFingerprint: string,
+): number | null {
+  if (fingerprint === baseFingerprint) return 1;
+  const prefix = `${baseFingerprint}#`;
+  if (!fingerprint.startsWith(prefix)) return null;
+  const suffix = fingerprint.slice(prefix.length);
+  if (!/^[1-9][0-9]*$/.test(suffix)) return null;
+  const n = Number(suffix);
+  return n >= 2 ? n : null;
+}
+
+/**
+ * `takenFingerprints` are rows already stored for this material (base and
+ * `#N`). No base row → the unsuffixed hash. Otherwise start at count + 1 and
+ * walk up until the suffix is free.
+ */
+export function nextOccurrenceFingerprint(
+  baseFingerprint: string,
+  takenFingerprints: readonly string[],
+): { fingerprint: string; occurrence: number; possibleDuplicate: boolean } {
+  const used = new Set<string>();
+  for (const fp of takenFingerprints) {
+    if (occurrenceOfFingerprint(fp, baseFingerprint) != null) used.add(fp);
+  }
+  if (!used.has(baseFingerprint)) {
+    return { fingerprint: baseFingerprint, occurrence: 1, possibleDuplicate: false };
+  }
+  let occurrence = used.size + 1;
+  if (occurrence < 2) occurrence = 2;
+  let fingerprint = occurrenceFingerprint(baseFingerprint, occurrence);
+  while (used.has(fingerprint)) {
+    occurrence += 1;
+    fingerprint = occurrenceFingerprint(baseFingerprint, occurrence);
+  }
+  return { fingerprint, occurrence, possibleDuplicate: true };
+}
+
+/** One step past a fingerprint that just lost a UNIQUE race. */
+export function bumpOccurrenceFingerprint(
+  baseFingerprint: string,
+  failedFingerprint: string,
+): string {
+  const current = occurrenceOfFingerprint(failedFingerprint, baseFingerprint) ?? 1;
+  return occurrenceFingerprint(baseFingerprint, current + 1);
+}
