@@ -6,7 +6,7 @@ import {
   homeNextAction,
   navIncludesDeuda,
 } from "./nav";
-import { isDeudaEnabled } from "./features";
+import { DEUDA_ENABLED, isDeudaEnabled } from "./features";
 import {
   swipeIncludesDeuda,
   swipePathFor,
@@ -37,14 +37,12 @@ describe("slim 5-item nav", () => {
   });
 });
 
-describe("DEUDA_ENABLED flag", () => {
-  it("is on by default; only 0/false hides it", () => {
-    assert.equal(isDeudaEnabled("1"), true);
-    assert.equal(isDeudaEnabled("true"), true);
-    assert.equal(isDeudaEnabled("0"), false);
-    assert.equal(isDeudaEnabled("false"), false);
-    assert.equal(isDeudaEnabled(""), true);
-    assert.equal(isDeudaEnabled(undefined), true);
+describe("DEUDA_ENABLED (no flag)", () => {
+  it("is always on: no env value hides it", () => {
+    for (const v of ["1", "true", "0", "false", "", undefined]) {
+      assert.equal(isDeudaEnabled(v), true);
+    }
+    assert.equal(DEUDA_ENABLED, true);
   });
 
   it("keeps swipe on the slim path when the flag is off", () => {

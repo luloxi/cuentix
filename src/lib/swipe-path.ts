@@ -1,7 +1,7 @@
 /**
  * Continuous mobile swipe order:
  * Inicio → Lista → Resumen → Gráficos → Vista hogar → Gráficos hogar → Ahorros
- * Deuda stays out until DEUDA_ENABLED.
+ * Deuda is always on (no feature flag).
  */
 
 import { DEUDA_ENABLED } from "@/lib/features";

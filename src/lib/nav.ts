@@ -1,6 +1,6 @@
 /**
- * Canonical 5-item app nav. Deuda stays out even if DEUDA_ENABLED —
- * that flag only unlocks the /deuda stub/rebuild, never the bar.
+ * Canonical 5-item app nav. Deuda is never in the bar:
+ * it is reached from Inicio and the swipe path.
  */
 export const NAV_LINKS = [
   { href: "/dashboard", label: "Inicio" },
