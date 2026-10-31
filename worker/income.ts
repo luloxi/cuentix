@@ -8,10 +8,15 @@
  *
  * A generic TRANSFERENCIA / TRANSFERENCIA INMEDIATA with no own id, no
  * marker, and no counterpart is income. `annotateIncomeRows` sets
- * `revisar: true` on that payload. An outgoing transaction of the same
- * signed amount within one day, in another account of the same user,
- * makes the variable row internal (the twin rule). Recurring rows are not
- * label-skipped.
+ * `revisar: true` on that payload. The twin drops that variable row only
+ * when both sides are transfers: the label is transfer-shaped or an
+ * own-account credit, and the outgoing row is a transfer or an own-account
+ * transfer, same signed amount, within one day, in another account of the
+ * same user. Incomes have no bank. A missing income bank skips the bank
+ * difference check, but an empty bank never counts as another account, so
+ * the same household matches only when the outgoing bank is non-empty.
+ * Sueldo next to Alquiler or SU PAGO stays. Recurring rows are not
+ * label-skipped and are not twinned.
  */
 
 import {
@@ -114,11 +119,12 @@ export function annotateIncomeRows(rows: IncomeRow[], ctx?: IncomeContext): Anno
       id: row.id ?? `idx:${index}`,
       householdId,
       date: row.date,
+      description: row.label,
       amountArs: row.amount_ars,
       amountUsd: row.amount_usd,
     });
   });
-  const twins = pairIncomeInternalIds(variable, ctx?.outgoing ?? [], homes);
+  const twins = pairIncomeInternalIds(variable, ctx?.outgoing ?? [], homes, ownIds);
   return rows.map((row, index) => {
     const id = row.id ?? `idx:${index}`;
     const variableRow = row.kind !== "recurring";
