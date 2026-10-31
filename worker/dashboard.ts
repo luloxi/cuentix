@@ -87,6 +87,7 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
     sharedPrevTotalArs,
     debtBalanceArs: debt.balance,
     debtSettled: debt.settled,
+    debtActiveCard: debt.activeCard,
     monthTxCount: curOwn.n,
     categorySummary: ranked,
     householdServices: SERVICES.map((svc) => ({
@@ -214,6 +215,7 @@ async function debtSnapshot(env: Env, userId: string) {
        ds.force_settled AS force_settled,
        ds.saldo_deuda_ars AS saldo_deuda_ars,
        ds.saldo_deuda_usd AS saldo_deuda_usd,
+        ds.card_last4 AS card_last4,
        (
          SELECT COUNT(*)
          FROM card_statements cs
@@ -234,10 +236,11 @@ async function debtSnapshot(env: Env, userId: string) {
       force_settled: number | null;
       saldo_deuda_ars: string | null;
       saldo_deuda_usd: string | null;
+      card_last4: string | null;
       closed_statements: number | null;
       open_statements: number | null;
     }>();
-  if (!row) return { balance: 0, settled: false };
+  if (!row) return { balance: 0, settled: false, activeCard: false };
   const figure = debtFigure({
     forceSettled: Boolean(row.force_settled),
     saldoArs: row.saldo_deuda_ars == null ? null : num(row.saldo_deuda_ars),
@@ -245,7 +248,11 @@ async function debtSnapshot(env: Env, userId: string) {
     closedStatements: num(row.closed_statements),
     openStatements: num(row.open_statements),
   });
-  return { balance: figure.balanceArs, settled: figure.settled };
+  return {
+    balance: figure.balanceArs,
+    settled: figure.settled,
+    activeCard: Boolean(row.card_last4) && !figure.settled,
+  };
 }
 
 async function incomeRows(env: Env, userId: string) {

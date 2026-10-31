@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { formatArs, formatUsd, cn } from "@/lib/utils";
+import { PatrimonioView } from "@/components/patrimonio-view";
 import { formatPeriodLabel, formatPeriodShort, isCurrentCalendarMonth } from "@/lib/period-label";
 import { CategoryIcon } from "@/lib/category-icons";
 import { colorForCategory } from "@/lib/category-colors";
@@ -547,6 +548,7 @@ export function DashboardHome({
   sharedPrevTotalArs,
   debtBalanceArs,
   debtSettled,
+  debtActiveCard = false,
   monthTxCount,
   categorySummary,
   householdServices = [],
@@ -567,6 +569,7 @@ export function DashboardHome({
   sharedPrevTotalArs: number;
   debtBalanceArs: number;
   debtSettled: boolean;
+  debtActiveCard?: boolean;
   monthTxCount: number;
   categorySummary: CategorySummary[];
   householdServices?: HouseholdService[];
@@ -838,7 +841,9 @@ export function DashboardHome({
           className="group flex h-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 transition active:scale-[0.99] md:px-5 md:py-4"
           aria-label={
             debtSettled
-              ? "Deuda saldada"
+              ? debtActiveCard
+                ? "Sin deuda"
+                : "Sin deuda. Sin tarjeta activa"
               : `Deuda ${formatArs(debtBalanceArs)}`
           }
         >
@@ -854,8 +859,11 @@ export function DashboardHome({
                   : "text-red-800 dark:text-red-200",
               )}
             >
-              {debtSettled ? "Saldada" : formatArs(debtBalanceArs)}
+              {debtSettled ? "Sin deuda" : formatArs(debtBalanceArs)}
             </p>
+            {debtSettled && !debtActiveCard ? (
+              <p className="text-[11px] text-[var(--muted-fg)]">Sin tarjeta activa</p>
+            ) : null}
           </div>
           <TapHint />
         </Link>
@@ -903,6 +911,7 @@ export function DashboardHome({
     sharedPrevTotalArs,
     visibleServices,
     debtSettled,
+    debtActiveCard,
     debtBalanceArs,
     liveRates,
     period,
@@ -953,6 +962,7 @@ export function DashboardHome({
       <div className="flex flex-col gap-4 md:grid md:grid-cols-2 md:items-stretch md:gap-5">
         {sections}
       </div>
+      <PatrimonioView compact />
     </div>
   );
 }

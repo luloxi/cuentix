@@ -1,5 +1,7 @@
-import { SoonPage } from "@/components/soon-page";
+"use client";
+
+import { AhorrosView } from "@/components/ahorros-view";
 
 export default function Page() {
-  return <SoonPage title="Ahorros" />;
+  return <AhorrosView />;
 }

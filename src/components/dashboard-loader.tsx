@@ -15,6 +15,7 @@ type DashboardData = {
   sharedPrevTotalArs: number;
   debtBalanceArs: number;
   debtSettled: boolean;
+  debtActiveCard?: boolean;
   monthTxCount: number;
   categorySummary: Array<{ id: string; slug: string; name: string; total: number; pct: number }>;
   householdServices: Array<{ slug: string; name: string; paid: boolean }>;
@@ -97,6 +98,7 @@ export function DashboardLoader() {
       sharedPrevTotalArs={data.sharedPrevTotalArs}
       debtBalanceArs={data.debtBalanceArs}
       debtSettled={data.debtSettled}
+      debtActiveCard={data.debtActiveCard}
       monthTxCount={data.monthTxCount}
       categorySummary={data.categorySummary}
       householdServices={data.householdServices}
