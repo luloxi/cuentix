@@ -19,203 +19,62 @@
  *   They are not an own-account pattern here. Income-side JS
  *   (`isOwnAccountTransferDescription`) still treats both as internal so
  *   they stay out of Ingresos. That split is intentional.
- *   A numeric-only description (digits and dots) is accounting only as a
- *   Fiwind echo under the Ockham rule below. Unpaired numeric rows stay
- *   counted. JS `isBankAccountingEntry` still treats every amount-only tipo
- *   as accounting; that difference is intentional.
+ *   A numeric-only description (digits and dots) is not accounting by
+ *   itself. Unpaired Fiwind numeric rows stay counted. JS
+ *   `isBankAccountingEntry` still treats every amount-only tipo as
+ *   accounting; that difference is intentional.
  *
- * Ockham rule: a Fiwind row t whose description is only digits and dots is
- * a duplicate when a named twin of the same amount takes its slot.
- * A named twin is any other non-numeric row: a different id, any bank or
- * source, expense or not (a payment or a credit counts), and a description
- * that is not numeric-only. Another household counts only on the same
- * calendar day. The twin does not have to pass the phrase list; this
- * expression does not call itself. Amounts match when |ARS| differs by
- * less than 0.01 and t's ARS absolute value is at least 0.01, or |USD|
- * differs by less than 0.005 and t's USD absolute value is at least 0.005.
- * Two empty amounts do not match.
- * Pairing is 1:1, in two passes. Pass 1 is unchanged and stays inside t's
- * household. Same calendar day first: that day's Fiwind numeric rows of
- * this amount are ordered by id, and t is dropped when the number with a
- * smaller id is less than the number of named twins that day. Otherwise t
- * is residual. Inside t's ±2 day window (sargable `date` range on
- * `tx_household_date_idx`, plus `julianday` <= 2, which already includes
- * the same day), leftover named twins on a day are max(0, named − numeric)
- * and leftover numerics are the ones not taken that day. Residuals are
- * ordered by (date, id). t is dropped when the number of residual numerics
- * strictly before it is less than the leftover named twins in the window.
- * Pass 2 runs only when pass 1 kept t (second WHEN of a searched CASE).
- * It looks only at t.date. Each other household contributes
- * max(0, named − Fiwind numeric) of this amount that day. A named row
- * already taken by a same-day numeric in its own household adds nothing.
- * Payment and credit named rows count. Other households are enumerated
- * with `household_id IN (SELECT id FROM households WHERE id <> t.household_id)`
- * so each lookup is an equality search on `tx_household_date_idx`
- * (`household_id`, `date`), never a scan of transactions by date alone.
- * Fiwind numeric rows of this amount on t.date in every household
- * (`household_id IN (SELECT id FROM households)`) that survived pass 1
- * compete for that leftover total, ordered by id. t is dropped when the
- * number with a smaller id is less than the total. A numeric row that
- * pass 1 drops never reaches pass 2, so it consumes no cross-household leftover.
- * Supply is the same-day leftover only: pass 2 does not subtract
- * a leftover that pass 1's ±2 window also claims, so one named row can
- * cancel one same-household residual and one cross-household numeric.
- * Two numeric rows and no named twin both count. The twin is any named
- * row, expense or not. The Fiwind row itself is only ever dropped, never
- * double counted: this rule does not remove the twin or count t twice.
- * The ±2 day pass is greedy and approximate: each numeric row uses its own
- * window, so one leftover named twin near the edge can cancel two residuals
- * whose windows both contain it and do not contain each other. Pass 1 runs
- * only after `bank = 'Fiwind'` and the numeric-description check, so other
- * rows short-circuit.
+ * Fiwind numeric echoes are paired in `worker/fiwind-dups.ts`
+ * (`pairFiwindEchoes`), outside SQL. The Workers free plan cannot spend
+ * the CPU of a correlated scan. Each request loads candidates for the
+ * requesting user with one indexed query and passes the numeric ids to
+ * drop into `expenseSql` / `bankAccountingSql` / `consumosVisibleSql`.
+ * An empty set adds no clause, so `EXPENSE_SQL` and `BANK_ACCOUNTING_SQL`
+ * stay valid for callers that have no dup set. A loader error counts
+ * every row.
+ *
+ * Rule: a Fiwind row whose description is only digits and dots is dropped
+ * when a named twin takes its slot. A named twin is any other non-numeric
+ * row (any bank or source, payment and credit included). Eligible pairs
+ * are the same household and at most 2 calendar days apart, or two
+ * households of the same user on the same calendar day. The amount is the
+ * numeric row's own currency, signed and the same direction: USD when
+ * |amount_usd| >= 0.005 and the ARS counted amount is 0 the way `ARS_EXPR`
+ * is 0 when both sides are nonzero, otherwise ARS. Tolerance is strictly
+ * under 0.01 ARS or 0.005 USD. Pairs are taken closest-first, then
+ * same-household before cross-household, then numeric date, numeric id,
+ * named date, named id. Each row is used once. The named twin stays.
+ * Households the user does not belong to are not candidates.
  *
  * Consumos shows real spends plus internal transfers and the payment
  * exceptions in `isConsumosHiddenPayment`. Other bank-accounting lines
- * (paired numeric Fiwind echos, pesificación, Retiro) stay out of the list.
+ * (paired numeric Fiwind echoes, pesificación, Retiro) stay out of the list.
  * Unpaired numeric descriptions stay visible, unlike the legacy JS filter.
  * "Transferencia inmediata" and bare "TRANSFERENCIA" are spends, so they
  * stay on the list.
  */
 
-/** Digits and dots only, so "59900" and "449536.14" match and "Pago a DIA" does not. */
-function numericDescriptionSql(alias: string): string {
-  // IFNULL so a null description is false, not NULL, and AND can short-circuit.
-  return `(
-    upper(trim(IFNULL(${alias}.description_normalized, ''))) GLOB '[0-9]*'
-    AND upper(trim(IFNULL(${alias}.description_normalized, ''))) NOT GLOB '*[^0-9.]*'
-  )`;
-}
-
-/** Same non-zero ARS (< 0.01) or USD (< 0.005) amount as `a`. Empty does not match. */
-function amountCloseSql(a: string, b: string): string {
-  return `(
-    (
-      abs(CAST(IFNULL(${a}.amount_ars, '0') AS REAL)) >= 0.01
-      AND abs(
-        CAST(IFNULL(${b}.amount_ars, '0') AS REAL)
-        - CAST(IFNULL(${a}.amount_ars, '0') AS REAL)
-      ) < 0.01
-    )
-    OR (
-      abs(CAST(IFNULL(${a}.amount_usd, '0') AS REAL)) >= 0.005
-      AND abs(
-        CAST(IFNULL(${b}.amount_usd, '0') AS REAL)
-        - CAST(IFNULL(${a}.amount_usd, '0') AS REAL)
-      ) < 0.005
-    )
-  )`;
-}
+/** Ids safe to inline. Anything else is dropped before it can reach SQL. */
+const DUP_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 /**
- * Pass 1. Same-household 1:1 echo: same-day id order, then residual ±2 days
- * by (date, id). One `tx_household_date_idx` range for `row`.
- * `row` is a SQL alias, not a bound value.
+ * `OR t.id IN (SELECT value FROM json_each('<json array>'))`, or "".
+ * Ids are filtered with `DUP_ID`, JSON.stringified, and single quotes are
+ * doubled so the literal stays inside the SQL string.
  */
-function sameHouseholdEchoSql(row: string): string {
-  return `(
-    SELECT CASE
-      WHEN IFNULL(SUM(CASE WHEN d = ${row}.date THEN nums_before ELSE 0 END), 0)
-         < IFNULL(SUM(CASE WHEN d = ${row}.date THEN nameds ELSE 0 END), 0)
-      THEN 1
-      WHEN IFNULL(SUM(
-             CASE
-               WHEN d < ${row}.date THEN MAX(nums - nameds, 0)
-               WHEN d = ${row}.date THEN MAX(nums_before - nameds, 0)
-               ELSE 0
-             END
-           ), 0)
-         < IFNULL(SUM(MAX(nameds - nums, 0)), 0)
-      THEN 1
-      ELSE 0
-    END
-    FROM (
-      SELECT
-        echo.date AS d,
-        SUM(CASE
-          WHEN IFNULL(echo.bank, '') = 'Fiwind' AND ${numericDescriptionSql("echo")}
-          THEN 1 ELSE 0 END) AS nums,
-        SUM(CASE
-          WHEN IFNULL(echo.bank, '') = 'Fiwind'
-           AND ${numericDescriptionSql("echo")}
-           AND echo.id < ${row}.id
-          THEN 1 ELSE 0 END) AS nums_before,
-        SUM(CASE
-          WHEN echo.id <> ${row}.id
-           AND NOT ${numericDescriptionSql("echo")}
-          THEN 1 ELSE 0 END) AS nameds
-      FROM transactions echo
-      WHERE echo.household_id = ${row}.household_id
-        AND echo.date >= date(${row}.date, '-2 days')
-        AND echo.date <= date(${row}.date, '+2 days')
-        AND abs(julianday(echo.date) - julianday(${row}.date)) <= 2
-        AND ${amountCloseSql(row, "echo")}
-      GROUP BY echo.date
-    )
-  )`;
+function fiwindDupClause(dupIds?: Iterable<string>): string {
+  if (!dupIds) return "";
+  const safe: string[] = [];
+  for (const id of dupIds) {
+    if (typeof id === "string" && DUP_ID.test(id)) safe.push(id);
+  }
+  if (safe.length === 0) return "";
+  safe.sort();
+  const literal = JSON.stringify(safe).replaceAll("'", "''");
+  return `OR t.id IN (SELECT value FROM json_each('${literal}'))`;
 }
 
-/**
- * Pass 2. Cross-household 1:1 echo on t.date only, for a row pass 1 kept.
- * Leftover named rows and still-unpaired numerics are equality lookups on
- * `tx_household_date_idx` via `households`, not a date-only scan.
- */
-function crossHouseholdEchoSql(): string {
-  return `(
-    SELECT CASE
-      WHEN IFNULL((
-        SELECT COUNT(*)
-        FROM transactions n
-        WHERE n.household_id IN (SELECT id FROM households)
-          AND n.date = t.date
-          AND n.id < t.id
-          AND IFNULL(n.bank, '') = 'Fiwind'
-          AND ${numericDescriptionSql("n")}
-          AND ${amountCloseSql("t", "n")}
-          AND ${sameHouseholdEchoSql("n")} = 0
-      ), 0)
-       < IFNULL((
-        SELECT SUM(MAX(nameds - nums, 0))
-        FROM (
-          SELECT
-            SUM(CASE
-              WHEN NOT ${numericDescriptionSql("xecho")}
-              THEN 1 ELSE 0 END) AS nameds,
-            SUM(CASE
-              WHEN IFNULL(xecho.bank, '') = 'Fiwind' AND ${numericDescriptionSql("xecho")}
-              THEN 1 ELSE 0 END) AS nums
-          FROM transactions xecho
-          WHERE xecho.household_id IN (
-            SELECT id FROM households WHERE id <> t.household_id
-          )
-            AND xecho.date = t.date
-            AND ${amountCloseSql("t", "xecho")}
-          GROUP BY xecho.household_id
-        )
-      ), 0)
-      THEN 1
-      ELSE 0
-    END
-  )`;
-}
-
-/**
- * 1:1 Ockham echo. Pass 1 is same-household (same day, then ±2). Pass 2 is
- * another household on the same calendar day, and only when pass 1 kept t.
- */
-const FIWIND_NUMERIC_ECHO_SQL = `(
-  IFNULL(t.bank, '') = 'Fiwind'
-  AND ${numericDescriptionSql("t")}
-  AND (
-    CASE
-      WHEN ${sameHouseholdEchoSql("t")} = 1 THEN 1
-      WHEN ${crossHouseholdEchoSql()} = 1 THEN 1
-      ELSE 0
-    END
-  ) = 1
-)`;
-
-/** True when the description is bank accounting (not a household spend). */
-export const BANK_ACCOUNTING_SQL = `(
+const BANK_ACCOUNTING_BODY = `
   upper(t.description_normalized) LIKE '%CAMBIO DE MONEDA%'
   OR upper(t.description_normalized) LIKE '%CAMBIO MONEDA%'
   OR upper(t.description_normalized) LIKE '%CUENTA TUYA%'
@@ -265,9 +124,20 @@ export const BANK_ACCOUNTING_SQL = `(
   OR upper(trim(t.description_normalized)) IN (
     'COMPRA USD', 'COMPRA USDC', 'COMPRA USDT', 'COMPRA USDB',
     'VENTA USD', 'VENTA USDC', 'VENTA USDT', 'VENTA USDB'
-  )
-  OR ${FIWIND_NUMERIC_ECHO_SQL}
+  )`;
+
+/**
+ * Phrase list, plus numeric Fiwind ids already paired in
+ * `pairFiwindEchoes`. An empty dup set is the phrase list alone.
+ */
+export function bankAccountingSql(dupIds?: Iterable<string>): string {
+  const dup = fiwindDupClause(dupIds);
+  return `(${BANK_ACCOUNTING_BODY}${dup ? `\n  ${dup}` : ""}
 )`;
+}
+
+/** Phrase list only. Same as `bankAccountingSql()` with no dup ids. */
+export const BANK_ACCOUNTING_SQL = bankAccountingSql();
 
 /**
  * Internal transfers stay on the Consumos list (out of the expense total).
@@ -320,13 +190,18 @@ export const INTERNAL_VISIBLE_SQL = `(
   )
 )`;
 
-export const EXPENSE_SQL = `
+export function expenseSql(dupIds?: Iterable<string>): string {
+  return `
   t.is_payment = 0
   AND t.is_credit = 0
   AND IFNULL(t.source, '') NOT IN ('bbva_period', 'bbva_pdf')
   AND (t.linked_transaction_id IS NULL OR t.source = 'invoice_iog')
-  AND NOT ${BANK_ACCOUNTING_SQL}
+  AND NOT ${bankAccountingSql(dupIds)}
 `;
+}
+
+/** Expense filter with no Fiwind dup clause. Same as `expenseSql()`. */
+export const EXPENSE_SQL = expenseSql();
 
 export const ARS_EXPR = `
   CASE
@@ -389,8 +264,11 @@ export function reintegroPayeeSql(raw: string | undefined): string {
     .join("\n");
 }
 
-export function consumosVisibleSql(reintegroPayees?: string): string {
-  return CONSUMOS_VISIBLE_SQL.replace("/*REINTEGRO_PAYEES*/", reintegroPayeeSql(reintegroPayees));
+export function consumosVisibleSql(reintegroPayees?: string, dupIds?: Iterable<string>): string {
+  return CONSUMOS_VISIBLE_SQL.replace("/*REINTEGRO_PAYEES*/", reintegroPayeeSql(reintegroPayees)).replace(
+    "/*BANK_ACCOUNTING*/",
+    bankAccountingSql(dupIds),
+  );
 }
 
 const CONSUMOS_VISIBLE_SQL = `
@@ -416,6 +294,6 @@ const CONSUMOS_VISIBLE_SQL = `
   AND IFNULL(t.source, '') NOT IN ('bbva_period', 'bbva_pdf')
   AND (
     ${INTERNAL_VISIBLE_SQL}
-    OR NOT ${BANK_ACCOUNTING_SQL}
+    OR NOT /*BANK_ACCOUNTING*/
   )
 `;

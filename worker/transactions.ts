@@ -25,6 +25,7 @@ import {
   type OutboxDraft,
 } from "./serpix-sync";
 import { reintegroFlags } from "./reintegro-flags";
+import { loadFiwindEchoIds } from "./fiwind-dups";
 import { consumosVisibleSql } from "./sql";
 
 const MAX_LIMIT = 100;
@@ -73,11 +74,13 @@ async function listTransactions(req: Request, env: Env, user: SessionUser): Prom
     forceSharedOnly(active.name);
   const limit = clampInt(url.searchParams.get("limit"), 10, 1, MAX_LIMIT);
   const offset = clampInt(url.searchParams.get("offset"), 0, 0, 100_000);
+  const echoIds = await loadFiwindEchoIds(env.DB, user.id);
   const { where, binds } = buildWhere(url, {
     householdId: active.id,
     userId: user.id,
     sharedOnly,
     reintegroPayees: env.REINTEGRO_PAYEES,
+    echoIds,
   });
 
   const [page, countRow, periods, categories, members, iogRow] = await Promise.all([
@@ -181,7 +184,13 @@ async function listTransactions(req: Request, env: Env, user: SessionUser): Prom
 
 function buildWhere(
   url: URL,
-  scope: { householdId: string; userId: string; sharedOnly: boolean; reintegroPayees?: string },
+  scope: {
+    householdId: string;
+    userId: string;
+    sharedOnly: boolean;
+    reintegroPayees?: string;
+    echoIds?: readonly string[];
+  },
 ): { where: string; binds: unknown[] } {
   const binds: unknown[] = [];
   const ph = (value: unknown) => {
@@ -190,7 +199,7 @@ function buildWhere(
   };
   const parts = [
     `t.household_id = ${ph(scope.householdId)}`,
-    consumosVisibleSql(scope.reintegroPayees),
+    consumosVisibleSql(scope.reintegroPayees, scope.echoIds),
   ];
   if (scope.sharedOnly) parts.push("t.ownership = 'shared'");
   else parts.push(`(t.ownership = 'shared' OR t.paid_by_user_id = ${ph(scope.userId)})`);
