@@ -26,31 +26,48 @@
  *
  * Ockham rule: a Fiwind row t whose description is only digits and dots is
  * a duplicate when a named twin of the same amount takes its slot.
- * A named twin is any other non-numeric row: a different id, the same
- * household (never another household), any bank or source, expense or not
- * (a payment or a credit counts), and a description that is not
- * numeric-only. The twin does not have to pass the phrase list; this
+ * A named twin is any other non-numeric row: a different id, any bank or
+ * source, expense or not (a payment or a credit counts), and a description
+ * that is not numeric-only. Another household counts only on the same
+ * calendar day. The twin does not have to pass the phrase list; this
  * expression does not call itself. Amounts match when |ARS| differs by
  * less than 0.01 and t's ARS absolute value is at least 0.01, or |USD|
  * differs by less than 0.005 and t's USD absolute value is at least 0.005.
  * Two empty amounts do not match.
- * Pairing is 1:1. Same calendar day first: that day's Fiwind numeric rows
- * of this amount are ordered by id, and t is dropped when the number with
- * a smaller id is less than the number of named twins that day. Otherwise
- * t is residual. Inside t's ±2 day window (sargable `date` range on
+ * Pairing is 1:1, in two passes. Pass 1 is unchanged and stays inside t's
+ * household. Same calendar day first: that day's Fiwind numeric rows of
+ * this amount are ordered by id, and t is dropped when the number with a
+ * smaller id is less than the number of named twins that day. Otherwise t
+ * is residual. Inside t's ±2 day window (sargable `date` range on
  * `tx_household_date_idx`, plus `julianday` <= 2, which already includes
  * the same day), leftover named twins on a day are max(0, named − numeric)
  * and leftover numerics are the ones not taken that day. Residuals are
  * ordered by (date, id). t is dropped when the number of residual numerics
  * strictly before it is less than the leftover named twins in the window.
+ * Pass 2 runs only when pass 1 kept t (second WHEN of a searched CASE).
+ * It looks only at t.date. Each other household contributes
+ * max(0, named − Fiwind numeric) of this amount that day. A named row
+ * already taken by a same-day numeric in its own household adds nothing.
+ * Payment and credit named rows count. Other households are enumerated
+ * with `household_id IN (SELECT id FROM households WHERE id <> t.household_id)`
+ * so each lookup is an equality search on `tx_household_date_idx`
+ * (`household_id`, `date`), never a scan of transactions by date alone.
+ * Fiwind numeric rows of this amount on t.date in every household
+ * (`household_id IN (SELECT id FROM households)`) that survived pass 1
+ * compete for that leftover total, ordered by id. t is dropped when the
+ * number with a smaller id is less than the total. A numeric row that
+ * pass 1 drops never reaches pass 2, so it consumes no cross-household leftover.
+ * Supply is the same-day leftover only: pass 2 does not subtract
+ * a leftover that pass 1's ±2 window also claims, so one named row can
+ * cancel one same-household residual and one cross-household numeric.
  * Two numeric rows and no named twin both count. The twin is any named
  * row, expense or not. The Fiwind row itself is only ever dropped, never
  * double counted: this rule does not remove the twin or count t twice.
  * The ±2 day pass is greedy and approximate: each numeric row uses its own
  * window, so one leftover named twin near the edge can cancel two residuals
- * whose windows both contain it and do not contain each other. The
- * aggregate runs only after `bank = 'Fiwind'` and the numeric-description
- * check, so other rows short-circuit.
+ * whose windows both contain it and do not contain each other. Pass 1 runs
+ * only after `bank = 'Fiwind'` and the numeric-description check, so other
+ * rows short-circuit.
  *
  * Consumos shows real spends plus internal transfers and the payment
  * exceptions in `isConsumosHiddenPayment`. Other bank-accounting lines
@@ -90,21 +107,20 @@ function amountCloseSql(a: string, b: string): string {
 }
 
 /**
- * 1:1 Ockham echo. Same-day id order first, then residual ±2 days by (date, id).
- * One index range scan per Fiwind numeric row (`tx_household_date_idx`).
+ * Pass 1. Same-household 1:1 echo: same-day id order, then residual ±2 days
+ * by (date, id). One `tx_household_date_idx` range for `row`.
+ * `row` is a SQL alias, not a bound value.
  */
-const FIWIND_NUMERIC_ECHO_SQL = `(
-  IFNULL(t.bank, '') = 'Fiwind'
-  AND ${numericDescriptionSql("t")}
-  AND (
+function sameHouseholdEchoSql(row: string): string {
+  return `(
     SELECT CASE
-      WHEN IFNULL(SUM(CASE WHEN d = t.date THEN nums_before ELSE 0 END), 0)
-         < IFNULL(SUM(CASE WHEN d = t.date THEN nameds ELSE 0 END), 0)
+      WHEN IFNULL(SUM(CASE WHEN d = ${row}.date THEN nums_before ELSE 0 END), 0)
+         < IFNULL(SUM(CASE WHEN d = ${row}.date THEN nameds ELSE 0 END), 0)
       THEN 1
       WHEN IFNULL(SUM(
              CASE
-               WHEN d < t.date THEN MAX(nums - nameds, 0)
-               WHEN d = t.date THEN MAX(nums_before - nameds, 0)
+               WHEN d < ${row}.date THEN MAX(nums - nameds, 0)
+               WHEN d = ${row}.date THEN MAX(nums_before - nameds, 0)
                ELSE 0
              END
            ), 0)
@@ -121,20 +137,80 @@ const FIWIND_NUMERIC_ECHO_SQL = `(
         SUM(CASE
           WHEN IFNULL(echo.bank, '') = 'Fiwind'
            AND ${numericDescriptionSql("echo")}
-           AND echo.id < t.id
+           AND echo.id < ${row}.id
           THEN 1 ELSE 0 END) AS nums_before,
         SUM(CASE
-          WHEN echo.id <> t.id
+          WHEN echo.id <> ${row}.id
            AND NOT ${numericDescriptionSql("echo")}
           THEN 1 ELSE 0 END) AS nameds
       FROM transactions echo
-      WHERE echo.household_id = t.household_id
-        AND echo.date >= date(t.date, '-2 days')
-        AND echo.date <= date(t.date, '+2 days')
-        AND abs(julianday(echo.date) - julianday(t.date)) <= 2
-        AND ${amountCloseSql("t", "echo")}
+      WHERE echo.household_id = ${row}.household_id
+        AND echo.date >= date(${row}.date, '-2 days')
+        AND echo.date <= date(${row}.date, '+2 days')
+        AND abs(julianday(echo.date) - julianday(${row}.date)) <= 2
+        AND ${amountCloseSql(row, "echo")}
       GROUP BY echo.date
     )
+  )`;
+}
+
+/**
+ * Pass 2. Cross-household 1:1 echo on t.date only, for a row pass 1 kept.
+ * Leftover named rows and still-unpaired numerics are equality lookups on
+ * `tx_household_date_idx` via `households`, not a date-only scan.
+ */
+function crossHouseholdEchoSql(): string {
+  return `(
+    SELECT CASE
+      WHEN IFNULL((
+        SELECT COUNT(*)
+        FROM transactions n
+        WHERE n.household_id IN (SELECT id FROM households)
+          AND n.date = t.date
+          AND n.id < t.id
+          AND IFNULL(n.bank, '') = 'Fiwind'
+          AND ${numericDescriptionSql("n")}
+          AND ${amountCloseSql("t", "n")}
+          AND ${sameHouseholdEchoSql("n")} = 0
+      ), 0)
+       < IFNULL((
+        SELECT SUM(MAX(nameds - nums, 0))
+        FROM (
+          SELECT
+            SUM(CASE
+              WHEN NOT ${numericDescriptionSql("xecho")}
+              THEN 1 ELSE 0 END) AS nameds,
+            SUM(CASE
+              WHEN IFNULL(xecho.bank, '') = 'Fiwind' AND ${numericDescriptionSql("xecho")}
+              THEN 1 ELSE 0 END) AS nums
+          FROM transactions xecho
+          WHERE xecho.household_id IN (
+            SELECT id FROM households WHERE id <> t.household_id
+          )
+            AND xecho.date = t.date
+            AND ${amountCloseSql("t", "xecho")}
+          GROUP BY xecho.household_id
+        )
+      ), 0)
+      THEN 1
+      ELSE 0
+    END
+  )`;
+}
+
+/**
+ * 1:1 Ockham echo. Pass 1 is same-household (same day, then ±2). Pass 2 is
+ * another household on the same calendar day, and only when pass 1 kept t.
+ */
+const FIWIND_NUMERIC_ECHO_SQL = `(
+  IFNULL(t.bank, '') = 'Fiwind'
+  AND ${numericDescriptionSql("t")}
+  AND (
+    CASE
+      WHEN ${sameHouseholdEchoSql("t")} = 1 THEN 1
+      WHEN ${crossHouseholdEchoSql()} = 1 THEN 1
+      ELSE 0
+    END
   ) = 1
 )`;
 

@@ -88,6 +88,7 @@ describe("EXPENSE_SQL matches isExpenseRow on the phrases that drifted", () => {
   it("agrees row by row, except documented SQL differences", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(`
+      CREATE TABLE households (id text PRIMARY KEY);
       CREATE TABLE transactions (
         id text,
         household_id text,
@@ -196,6 +197,76 @@ describe("EXPENSE_SQL matches isExpenseRow on the phrases that drifted", () => {
       .all("hh", "2026-08-18", "2026-08-18", "2026-08-18", "10", "10", "0", "0") as Array<{ detail: string }>;
     assert.match(grouped.map((row) => row.detail).join("\n"), /tx_household_date_idx/);
   });
+
+  it("uses tx_household_date_idx for the cross-household echo lookup", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = OFF");
+    for (const file of ["0001_app.sql", "0002_auth.sql", "0003_serpix_sync.sql", "0004_card_closed.sql"]) {
+      db.exec(readFileSync(join(root, "migrations", file), "utf8"));
+    }
+    const amount = `
+      AND (
+        (
+          abs(CAST(IFNULL(?, '0') AS REAL)) >= 0.01
+          AND abs(CAST(IFNULL(xecho.amount_ars, '0') AS REAL) - CAST(IFNULL(?, '0') AS REAL)) < 0.01
+        )
+        OR (
+          abs(CAST(IFNULL(?, '0') AS REAL)) >= 0.005
+          AND abs(CAST(IFNULL(xecho.amount_usd, '0') AS REAL) - CAST(IFNULL(?, '0') AS REAL)) < 0.005
+        )
+      )`;
+    const supply = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT xecho.household_id
+         FROM transactions xecho
+         WHERE xecho.household_id IN (SELECT id FROM households WHERE id <> ?)
+           AND xecho.date = ?
+           ${amount}
+         GROUP BY xecho.household_id`,
+      )
+      .all("hh-a", "2026-08-18", "50", "50", "0", "0") as Array<{ detail: string }>;
+    const demand = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT n.id
+         FROM transactions n
+         WHERE n.household_id IN (SELECT id FROM households)
+           AND n.date = ?
+           AND n.id < ?
+           AND (
+             SELECT COUNT(*)
+             FROM transactions earlier
+             WHERE earlier.household_id = n.household_id
+               AND earlier.date = n.date
+               AND earlier.id < n.id
+           ) >= (
+             SELECT COUNT(*)
+             FROM transactions twin
+             WHERE twin.household_id = n.household_id
+               AND twin.date = n.date
+           )`,
+      )
+      .all("2026-08-18", "n2") as Array<{ detail: string }>;
+    for (const plan of [supply, demand]) {
+      const detail = plan.map((row) => row.detail).join("\n");
+      assert.match(detail, /tx_household_date_idx \(household_id=\? AND date=\?\)/);
+      assert.doesNotMatch(detail, /SCAN (?!households\b)/);
+    }
+    const live = db
+      .prepare(`EXPLAIN QUERY PLAN SELECT id FROM transactions t WHERE ${EXPENSE_SQL}`)
+      .all() as Array<{ detail: string }>;
+    const liveDetail = live.map((row) => row.detail).join("\n");
+    assert.match(
+      liveDetail,
+      /SEARCH xecho USING INDEX tx_household_date_idx \(household_id=\? AND date=\?\)/,
+    );
+    assert.match(
+      liveDetail,
+      /SEARCH n USING INDEX tx_household_date_idx \(household_id=\? AND date=\?\)/,
+    );
+    assert.doesNotMatch(liveDetail, /SCAN (xecho|n|transactions)\b/);
+  });
 });
 
 type EchoRow = {
@@ -214,6 +285,7 @@ type EchoRow = {
 function keptExpenses(rows: EchoRow[]): Set<string> {
   const db = new DatabaseSync(":memory:");
   db.exec(`
+    CREATE TABLE households (id text PRIMARY KEY);
     CREATE TABLE transactions (
       id text,
       household_id text,
@@ -228,6 +300,7 @@ function keptExpenses(rows: EchoRow[]): Set<string> {
       amount_usd text
     );
   `);
+  const insertHousehold = db.prepare(`INSERT OR IGNORE INTO households (id) VALUES (?)`);
   const insert = db.prepare(
     `INSERT INTO transactions (
        id, household_id, date, description_normalized, source, is_payment, is_credit,
@@ -235,9 +308,11 @@ function keptExpenses(rows: EchoRow[]): Set<string> {
      ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
   );
   for (const row of rows) {
+    const householdId = row.householdId ?? "hh";
+    insertHousehold.run(householdId);
     insert.run(
       row.id,
-      row.householdId ?? "hh",
+      householdId,
       row.date ?? "2026-08-18",
       row.description,
       row.source ?? "bbva_import",
@@ -282,13 +357,103 @@ describe("Ockham Fiwind numeric echoes", () => {
     assert.equal(far.has("named"), true);
   });
 
-  it("keeps the numeric row when the same amount is in another household", () => {
+  it("drops a same-day same-amount named row from another household", () => {
     const kept = keptExpenses([
       { id: "num", description: "80.00", bank: "Fiwind", date: "2026-08-18", amountArs: "80.00", householdId: "hh-a" },
       { id: "named", description: "Pago a DIA", date: "2026-08-18", amountArs: "80.00", householdId: "hh-b" },
     ]);
+    assert.equal(kept.has("num"), false);
+    assert.equal(kept.has("named"), true);
+  });
+
+  it("keeps the numeric row when another household's named row is one day away", () => {
+    const kept = keptExpenses([
+      { id: "num", description: "81.00", bank: "Fiwind", date: "2026-08-18", amountArs: "81.00", householdId: "hh-a" },
+      { id: "named", description: "Kiosco", date: "2026-08-19", amountArs: "81.00", householdId: "hh-b" },
+    ]);
     assert.equal(kept.has("num"), true);
     assert.equal(kept.has("named"), true);
+  });
+
+  it("keeps the numeric row when another household's same-day amount differs", () => {
+    const kept = keptExpenses([
+      { id: "num", description: "82.00", bank: "Fiwind", date: "2026-08-18", amountArs: "82.00", householdId: "hh-a" },
+      { id: "named", description: "Kiosco", date: "2026-08-18", amountArs: "90.00", householdId: "hh-b" },
+    ]);
+    assert.equal(kept.has("num"), true);
+    assert.equal(kept.has("named"), true);
+  });
+
+  it("pairs one cross-household named row with one of two numeric rows, ordered by id", () => {
+    const kept = keptExpenses([
+      { id: "n1", description: "83.00", bank: "Fiwind", date: "2026-08-18", amountArs: "83.00", householdId: "hh-a" },
+      { id: "n2", description: "83.00", bank: "Fiwind", date: "2026-08-18", amountArs: "83.00", householdId: "hh-a" },
+      { id: "named", description: "Cafe", date: "2026-08-18", amountArs: "83.00", householdId: "hh-b" },
+    ]);
+    assert.equal(kept.has("n1"), false);
+    assert.equal(kept.has("n2"), true);
+    assert.equal(kept.has("named"), true);
+    assert.equal([...kept].filter((id) => id === "n1" || id === "n2").length, 1);
+  });
+
+  it("uses a same-household twin before a cross-household twin", () => {
+    const both = keptExpenses([
+      { id: "n1", description: "84.00", bank: "Fiwind", date: "2026-08-18", amountArs: "84.00", householdId: "hh-a" },
+      { id: "n2", description: "84.00", bank: "Fiwind", date: "2026-08-18", amountArs: "84.00", householdId: "hh-a" },
+      { id: "same", description: "Cafe", date: "2026-08-18", amountArs: "84.00", householdId: "hh-a" },
+      { id: "cross", description: "Kiosco", date: "2026-08-18", amountArs: "84.00", householdId: "hh-b" },
+    ]);
+    assert.equal(both.has("n1"), false);
+    assert.equal(both.has("n2"), false);
+    assert.equal(both.has("same"), true);
+    assert.equal(both.has("cross"), true);
+
+    // a-num is paired at home, so the cross twin stays free for c-num.
+    const shared = keptExpenses([
+      { id: "a-num", description: "85.00", bank: "Fiwind", date: "2026-08-18", amountArs: "85.00", householdId: "hh-a" },
+      { id: "a-named", description: "Cafe", date: "2026-08-18", amountArs: "85.00", householdId: "hh-a" },
+      { id: "b-named", description: "Kiosco", date: "2026-08-18", amountArs: "85.00", householdId: "hh-b" },
+      { id: "c-num", description: "85.00", bank: "Fiwind", date: "2026-08-18", amountArs: "85.00", householdId: "hh-c" },
+    ]);
+    assert.equal(shared.has("a-num"), false);
+    assert.equal(shared.has("c-num"), false);
+    assert.equal(shared.has("a-named"), true);
+    assert.equal(shared.has("b-named"), true);
+  });
+
+  it("shares one cross-household named row across households by id", () => {
+    const kept = keptExpenses([
+      { id: "a-num", description: "86.00", bank: "Fiwind", date: "2026-08-18", amountArs: "86.00", householdId: "hh-a" },
+      { id: "b-num", description: "86.00", bank: "Fiwind", date: "2026-08-18", amountArs: "86.00", householdId: "hh-b" },
+      { id: "c-named", description: "Cafe", date: "2026-08-18", amountArs: "86.00", householdId: "hh-c" },
+    ]);
+    assert.equal(kept.has("a-num"), false);
+    assert.equal(kept.has("b-num"), true);
+    assert.equal(kept.has("c-named"), true);
+  });
+
+  it("does not reuse a named row already paired inside its own household", () => {
+    const kept = keptExpenses([
+      { id: "a-num", description: "87.00", bank: "Fiwind", date: "2026-08-18", amountArs: "87.00", householdId: "hh-a" },
+      { id: "m-num", description: "87.00", bank: "Fiwind", date: "2026-08-18", amountArs: "87.00", householdId: "hh-b" },
+      { id: "m-named", description: "Cafe", date: "2026-08-18", amountArs: "87.00", householdId: "hh-b" },
+    ]);
+    assert.equal(kept.has("m-num"), false);
+    assert.equal(kept.has("a-num"), true);
+    assert.equal(kept.has("m-named"), true);
+  });
+
+  it("payment or credit named row in another household still cancels one numeric row", () => {
+    const kept = keptExpenses([
+      { id: "num-pay", description: "88.00", bank: "Fiwind", date: "2026-08-18", amountArs: "88.00", householdId: "hh-a" },
+      { id: "pay", description: "Alquiler", date: "2026-08-18", amountArs: "88.00", isPayment: 1, householdId: "hh-b" },
+      { id: "num-cr", description: "89.00", bank: "Fiwind", date: "2026-08-18", amountArs: "89.00", householdId: "hh-a" },
+      { id: "cr", description: "Devolucion super", date: "2026-08-18", amountArs: "89.00", isCredit: 1, householdId: "hh-b" },
+    ]);
+    assert.equal(kept.has("num-pay"), false);
+    assert.equal(kept.has("pay"), false);
+    assert.equal(kept.has("num-cr"), false);
+    assert.equal(kept.has("cr"), false);
   });
 
   it("payment/credit named twin does cancel (1:1)", () => {
@@ -430,6 +595,7 @@ describe("consumosVisibleSql matches the legacy list filter", () => {
     ];
     const db = new DatabaseSync(":memory:");
     db.exec(`
+      CREATE TABLE households (id text PRIMARY KEY);
       CREATE TABLE categories (id text, slug text);
       CREATE TABLE transactions (
         id text,
