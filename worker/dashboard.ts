@@ -41,7 +41,7 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
     paidServiceSlugs(env, active.id, current.start, current.end, excludedIds),
     savingsTotals(env, user.id),
     debtSnapshot(env, user.id),
-    incomeRows(env, user.id),
+    incomeRows(env, user.id, active.id),
     fxPromise,
   ]);
 
@@ -271,12 +271,12 @@ async function debtSnapshot(env: Env, userId: string) {
   };
 }
 
-async function incomeRows(env: Env, userId: string) {
+async function incomeRows(env: Env, userId: string, householdId: string) {
   const res = await env.DB.prepare(
     `SELECT id, household_id, date, label, kind, frequency, amount_ars, amount_usd
-     FROM incomes WHERE user_id = ? ORDER BY date DESC LIMIT 400`,
+     FROM incomes WHERE user_id = ? AND household_id = ? ORDER BY date DESC LIMIT 400`,
   )
-    .bind(userId)
+    .bind(userId, householdId)
     .all<{
       id: string;
       household_id: string;
