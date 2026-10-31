@@ -180,6 +180,9 @@ describe("TRANSFER_CANDIDATE_SQL", () => {
     assert.equal(compoundTermCount(FIWIND_ECHO_CANDIDATE_SQL), 4);
     assert.equal(compoundTermCount(TRANSFER_CANDIDATE_SQL), 5);
     assert.equal(compoundTermCount(INCOME_TWIN_SQL), 2);
+    assert.match(INCOME_TWIN_SQL, /LIKE '%TRANSFERENCIA%'/);
+    assert.match(INCOME_TWIN_SQL, /m\.is_credit = 0/);
+    assert.match(INCOME_TWIN_SQL, /i\.kind != 'recurring'/);
   });
 
   it("binds the user on each statement and reads transactions through the household date index", () => {
@@ -428,7 +431,7 @@ describe("transfer exclusion in the expense fragment", () => {
         id: "income-out",
         householdId: home,
         date: "2026-08-10",
-        description: "PAGO SERVICIO",
+        description: "TRANSFERENCIA INMEDIATA",
         bank: "GALICIA",
         amountArs: "80",
       },
@@ -559,6 +562,71 @@ describe("transfer exclusion in the expense fragment", () => {
     assert.equal(twin?.revisar, false);
     assert.equal(bare?.internal, false);
     assert.equal(bare?.revisar, true);
+    assert.equal(movements.incomeOutgoing.some((row) => row.id === "cafe"), false);
+  });
+
+  it("keeps Sueldo when Alquiler has the same amount, through the loader", async () => {
+    const db = openDb();
+    seedPeople(db);
+    const home = "hh-home";
+    insertTx(db, {
+      id: "rent",
+      householdId: home,
+      date: "2026-09-10",
+      description: "Alquiler",
+      bank: "BBVA",
+      amountArs: "500000",
+    });
+    insertTx(db, {
+      id: "pago",
+      householdId: home,
+      date: "2026-09-01",
+      description: "SU PAGO EN PESOS",
+      bank: "BBVA",
+      amountArs: "500000",
+      isPayment: 1,
+    });
+    insertIncome(db, {
+      id: "sueldo",
+      householdId: home,
+      date: "2026-09-10",
+      label: "Sueldo",
+      amountArs: "500000",
+    });
+    insertIncome(db, {
+      id: "sueldo-prev",
+      householdId: home,
+      date: "2026-08-31",
+      label: "Sueldo",
+      amountArs: "500000",
+    });
+    const movements = await loadExcludedMovementIds(wrap(db), "user-u", null);
+    assert.equal(movements.incomeOutgoing.some((row) => row.id === "rent"), false);
+    assert.equal(movements.incomeOutgoing.some((row) => row.id === "pago"), false);
+    const incomeRows = db
+      .prepare(
+        `SELECT id, household_id, date, label, kind, frequency, amount_ars, amount_usd
+         FROM incomes WHERE user_id = 'user-u'`,
+      )
+      .all() as Array<{
+      id: string;
+      household_id: string;
+      date: string;
+      label: string;
+      kind: string | null;
+      frequency: string | null;
+      amount_ars: string | null;
+      amount_usd: string | null;
+    }>;
+    const ctx = {
+      ownIds: movements.ownIds,
+      userHouseholdIds: movements.userHouseholdIds,
+      outgoing: movements.incomeOutgoing,
+    };
+    assert.equal(sumIncomeArs(incomeRows, "2026-09", 0, ctx), 500000);
+    assert.equal(sumIncomeArs(incomeRows, "2026-08", 0, ctx), 500000);
+    const noted = annotateIncomeRows(incomeRows, ctx);
+    assert.equal(noted.every((row) => row.internal === false), true);
   });
 
   it("returns no internal ids when the transfer statement fails and does not log the user id", async () => {

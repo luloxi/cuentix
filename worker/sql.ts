@@ -19,7 +19,10 @@
  *   the id is in the dup set. That set is Fiwind echo ids union internal
  *   transfers from `classifyTransferRows` (own-account id or an opposite
  *   incoming twin). A generic transfer with no payee still counts. Income
- *   uses the same data rule in `worker/income.ts`.
+ *   uses the same data rule in `worker/income.ts`: the income twin drops a
+ *   variable row only when both the label and the outgoing row are
+ *   transfers (or own-account credits), not when any same-amount spend is
+ *   nearby.
  *   A numeric-only description (digits and dots) is not accounting by
  *   itself. Unpaired Fiwind numeric rows stay counted. JS
  *   `isBankAccountingEntry` still treats every amount-only tipo as

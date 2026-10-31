@@ -38,6 +38,16 @@
  * with more than five terms, so income twins are a second statement. A
  * transfer-statement failure returns no internal ids, so those rows still
  * count. An income-twin failure keeps the transfer ids.
+ *
+ * The income twin (`pairIncomeInternalIds`) is separate from the expense
+ * twin. It drops a variable income only when both sides are transfers: the
+ * income label is transfer-shaped (`isTransferDescription`) or an
+ * own-account credit (marker or own id), and the outgoing row is a transfer
+ * or an own-account transfer. Sueldo next to Alquiler, or next to SU PAGO,
+ * stays income. Incomes have no bank column. A missing income bank skips
+ * the bank-difference check, but an empty bank never counts as another
+ * account, so the same household matches only when the outgoing bank is
+ * non-empty. A different household matches even if that bank is empty.
  */
 
 import { loadFiwindEchoIds, type FiwindEchoDb } from "./fiwind-dups";
@@ -84,6 +94,14 @@ export type IncomeMatchRow = {
   id: string;
   householdId?: string | null;
   date: string;
+  /** Income label. The twin runs only when this is a transfer or an own-account credit. */
+  description?: string | null;
+  /**
+   * Incomes have no bank column, so callers leave this unset.
+   * `undefined` or `null` means missing. `""` is an empty bank and cannot
+   * satisfy "another account" inside the same household.
+   */
+  bank?: string | null;
   amountArs?: string | number | null;
   amountUsd?: string | number | null;
 };
@@ -506,33 +524,84 @@ export function classifyTransferRows(
 type IncomeSide = {
   id: string;
   householdId: string;
+  /** `undefined` or `null`: incomes have no bank. `""`: empty, not another account. */
+  bank: string | null | undefined;
   date: string;
   day: number;
   ars: number;
   usd: number;
 };
 
+function bankText(bank: string | null | undefined): string {
+  return (bank ?? "").trim();
+}
+
+/** Transfer label, or an own-account credit (marker or configured/derived id). */
+function transferOrOwnAccount(description: string | null | undefined, ownIds: ReadonlySet<string>): boolean {
+  return (
+    isTransferDescription(description) ||
+    hasOwnAccountMarker(description) ||
+    descriptionHasOwnId(description, ownIds)
+  );
+}
+
 /**
- * Variable income ids cancelled by an outgoing transaction of the same signed
- * amount within one day, in another account of the same user. 1:1, closest
- * day first, then income date, income id, transaction date, transaction id.
+ * Another account of the same user, for the income twin.
+ *
+ * Choice: incomes have no bank column. When `incomeBank` is missing
+ * (`undefined` or `null`), skip the bank-difference check. An empty bank
+ * never counts as another account, so a same-household pair still requires
+ * a non-empty outgoing bank, and an explicit empty income bank does not
+ * match inside that household. A different household matches even when a
+ * bank is empty. Callers must already have required both sides to be
+ * transfers.
+ */
+function incomeOtherAccount(
+  incomeHousehold: string,
+  incomeBank: string | null | undefined,
+  tx: Side,
+  homes: ReadonlySet<string>,
+): boolean {
+  if (!homes.has(incomeHousehold) || !homes.has(tx.householdId)) return false;
+  if (incomeHousehold !== tx.householdId) return true;
+  if (!bankText(tx.bank)) return false;
+  if (incomeBank == null) return true;
+  const known = bankText(incomeBank);
+  if (!known) return false;
+  return known !== bankText(tx.bank);
+}
+
+/**
+ * Variable income ids cancelled by an outgoing transfer of the same signed
+ * amount within one day, in another account of the same user.
+ *
+ * Both sides must be transfers. The income label is transfer-shaped or an
+ * own-account credit. The outgoing row is a transfer or an own-account
+ * transfer. A salary next to rent, or next to a card payment, stays.
+ *
+ * 1:1, closest day first, then income date, income id, transaction date,
+ * transaction id. Each outgoing row cancels at most one income.
  */
 export function pairIncomeInternalIds(
   incomes: readonly IncomeMatchRow[],
   outgoing: readonly TransferClassRow[],
   userHouseholdIds: ReadonlySet<string>,
+  ownIds?: ReadonlySet<string>,
 ): Set<string> {
+  const ids = ownIds ?? new Set<string>();
   const incomesSides: IncomeSide[] = [];
   const seenIncome = new Set<string>();
   for (const row of incomes) {
     if (!row.id || !row.householdId || seenIncome.has(row.id)) continue;
     if (!userHouseholdIds.has(row.householdId)) continue;
+    if (!transferOrOwnAccount(row.description, ids)) continue;
     const day = dayIndex(row.date);
     if (day == null) continue;
     seenIncome.add(row.id);
     incomesSides.push({
       id: row.id,
       householdId: row.householdId,
+      bank: row.bank,
       date: row.date,
       day,
       ars: parseAmount(row.amountArs),
@@ -545,6 +614,7 @@ export function pairIncomeInternalIds(
     if (!row.id || seenTx.has(row.id)) continue;
     const side = toSide(row);
     if (!side || !userHouseholdIds.has(side.householdId)) continue;
+    if (!transferOrOwnAccount(side.description, ids)) continue;
     if (directionOf(side) !== "outgoing") continue;
     seenTx.add(row.id);
     txs.push(side);
@@ -563,15 +633,7 @@ export function pairIncomeInternalIds(
       if (!withinTolerance(amount, txAmount, tol)) continue;
       const distance = Math.abs(income.day - tx.day);
       if (distance > 1) continue;
-      const incomeSide: Side = {
-        ...tx,
-        id: income.id,
-        householdId: income.householdId,
-        bank: "",
-        date: income.date,
-        day: income.day,
-      };
-      if (!otherAccount(incomeSide, tx, userHouseholdIds)) continue;
+      if (!incomeOtherAccount(income.householdId, income.bank, tx, userHouseholdIds)) continue;
       pairs.push({
         distance,
         tDate: income.date,
@@ -615,7 +677,9 @@ export function pairIncomeInternalIds(
  *
  * `INCOME_TWIN_SQL` has its own `user_households` CTE. It binds `user_id`
  * three times (membership, then the user's incomes twice) and returns the
- * two `inc` arms: outgoing transactions that can cancel an income row.
+ * two `inc` arms: outgoing transfers that can cancel a transfer-shaped
+ * income row. The description filter drops rent, card payments, and other
+ * non-transfers before they reach JS.
  *
  * `hh` is one row per household. `tx` is an expense-eligible transfer-shaped
  * row. `marker` is a row that can contribute an own-account id. `near` is a
@@ -752,12 +816,55 @@ INNER JOIN transactions m
 `;
 
 /**
- * Outgoing transactions that can cancel an income row. Separate from
- * `TRANSFER_CANDIDATE_SQL` so neither statement exceeds five compound terms.
- * The same-household arm requires a non-empty bank. The other arm is a
- * different household of the same user. Both read `tx_household_date_idx`.
- * Column names match the transfer statement so the loader can merge rows.
+ * Outgoing transfers that can cancel a transfer-shaped income row.
+ * Separate from `TRANSFER_CANDIDATE_SQL` so neither statement exceeds five
+ * compound terms. The income label and the outgoing description must look
+ * like a transfer or an own-account move, and the outgoing row is not a
+ * credit (`is_credit = 0`). `is_payment` is not a hard filter: SU PAGO fails
+ * the description predicate, and an own-account transfer may be stored with
+ * `is_payment = 1`. The same-household arm requires a non-empty bank. An
+ * empty bank is not another account. The other arm is a different household
+ * of the same user. Both read `tx_household_date_idx`. Column names match
+ * the transfer statement so the loader can merge rows.
  */
+const INCOME_TWIN_LABEL_SQL = `
+  i.kind != 'recurring'
+  AND (
+    upper(IFNULL(i.label, '')) LIKE '%TRANSFERENCIA%'
+    OR upper(IFNULL(i.label, '')) LIKE '%OUTGOING TRANSFER%'
+    OR upper(IFNULL(i.label, '')) LIKE '%TRANSFER TO%'
+    OR upper(IFNULL(i.label, '')) LIKE '%TRANSF A%'
+    OR upper(IFNULL(i.label, '')) LIKE '%CUENTA PROPIA%'
+    OR upper(IFNULL(i.label, '')) LIKE '%CUENTA TUYA%'
+    OR upper(IFNULL(i.label, '')) LIKE '%OWN ACCOUNT%'
+    OR upper(IFNULL(i.label, '')) LIKE '%OWN CUIT%'
+  )`;
+
+const INCOME_TWIN_OUTGOING_SQL = `
+  m.is_credit = 0
+  AND (
+    upper(IFNULL(m.description_normalized, '')) LIKE '%TRANSFERENCIA%'
+    OR upper(IFNULL(m.description_normalized, '')) LIKE '%OUTGOING TRANSFER%'
+    OR upper(IFNULL(m.description_normalized, '')) LIKE '%TRANSFER TO%'
+    OR upper(IFNULL(m.description_normalized, '')) LIKE '%TRANSF A%'
+    OR upper(IFNULL(m.description_normalized, '')) LIKE '%CUENTA PROPIA%'
+    OR upper(IFNULL(m.description_normalized, '')) LIKE '%CUENTA TUYA%'
+    OR upper(IFNULL(m.description_normalized, '')) LIKE '%OWN ACCOUNT%'
+    OR upper(IFNULL(m.description_normalized, '')) LIKE '%OWN CUIT%'
+  )`;
+
+const INCOME_TWIN_AMOUNT_SQL = `
+  (
+    (
+      CAST(IFNULL(m.amount_ars, '0') AS REAL) * CAST(IFNULL(i.amount_ars, '0') AS REAL) > 0
+      AND abs(CAST(IFNULL(m.amount_ars, '0') AS REAL) - CAST(IFNULL(i.amount_ars, '0') AS REAL)) < 0.01
+    )
+    OR (
+      CAST(IFNULL(m.amount_usd, '0') AS REAL) * CAST(IFNULL(i.amount_usd, '0') AS REAL) > 0
+      AND abs(CAST(IFNULL(m.amount_usd, '0') AS REAL) - CAST(IFNULL(i.amount_usd, '0') AS REAL)) < 0.005
+    )
+  )`;
+
 export const INCOME_TWIN_SQL = `
 WITH user_households AS (
   SELECT household_id FROM household_members WHERE user_id = ?
@@ -779,18 +886,10 @@ INNER JOIN transactions m
   ON m.household_id = i.household_id
  AND m.date >= date(i.date, '-1 days')
  AND m.date <= date(i.date, '+1 days')
-WHERE m.is_credit = 0
+WHERE ${INCOME_TWIN_LABEL_SQL}
+  AND ${INCOME_TWIN_OUTGOING_SQL}
   AND IFNULL(m.bank, '') <> ''
-  AND (
-    (
-      CAST(IFNULL(m.amount_ars, '0') AS REAL) * CAST(IFNULL(i.amount_ars, '0') AS REAL) > 0
-      AND abs(CAST(IFNULL(m.amount_ars, '0') AS REAL) - CAST(IFNULL(i.amount_ars, '0') AS REAL)) < 0.01
-    )
-    OR (
-      CAST(IFNULL(m.amount_usd, '0') AS REAL) * CAST(IFNULL(i.amount_usd, '0') AS REAL) > 0
-      AND abs(CAST(IFNULL(m.amount_usd, '0') AS REAL) - CAST(IFNULL(i.amount_usd, '0') AS REAL)) < 0.005
-    )
-  )
+  AND ${INCOME_TWIN_AMOUNT_SQL}
 UNION ALL
 SELECT
   'inc' AS kind,
@@ -810,17 +909,9 @@ INNER JOIN transactions m
   ON m.household_id = uh.household_id
  AND m.date >= date(i.date, '-1 days')
  AND m.date <= date(i.date, '+1 days')
-WHERE m.is_credit = 0
-  AND (
-    (
-      CAST(IFNULL(m.amount_ars, '0') AS REAL) * CAST(IFNULL(i.amount_ars, '0') AS REAL) > 0
-      AND abs(CAST(IFNULL(m.amount_ars, '0') AS REAL) - CAST(IFNULL(i.amount_ars, '0') AS REAL)) < 0.01
-    )
-    OR (
-      CAST(IFNULL(m.amount_usd, '0') AS REAL) * CAST(IFNULL(i.amount_usd, '0') AS REAL) > 0
-      AND abs(CAST(IFNULL(m.amount_usd, '0') AS REAL) - CAST(IFNULL(i.amount_usd, '0') AS REAL)) < 0.005
-    )
-  )
+WHERE ${INCOME_TWIN_LABEL_SQL}
+  AND ${INCOME_TWIN_OUTGOING_SQL}
+  AND ${INCOME_TWIN_AMOUNT_SQL}
 `;
 
 export type TransferCandidateRow = {
