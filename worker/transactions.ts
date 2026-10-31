@@ -1,0 +1,855 @@
+import { normalizeBank } from "../src/lib/banks";
+import type { SessionUser } from "./auth";
+import { listVisibleCategories } from "./categories";
+import type { Env, WorkerContext } from "./env";
+import { activeHousehold, forceSharedOnly, isPersonalName, listMembers } from "./household";
+import { json, num, periodRange, sha256Hex } from "./http";
+import {
+  OUTBOX_LATEST_JOIN,
+  buildDeletePayload,
+  buildUpsertPayload,
+  enqueueOutboxStatements,
+  flushOutbox,
+  resolveBusinessAction,
+  syncStatusFromOutbox,
+  type OutboxDraft,
+} from "./serpix-sync";
+import { consumosVisibleSql } from "./sql";
+
+const MAX_LIMIT = 100;
+
+type TxRow = {
+  id: string;
+  date: string;
+  description_normalized: string;
+  amount_ars: string | null;
+  amount_usd: string | null;
+  installment: string | null;
+  is_payment: number;
+  ownership: string;
+  paid_by_user_id: string | null;
+  source: string;
+  linked_transaction_id: string | null;
+  bank: string | null;
+  category_id: string | null;
+  category_slug: string | null;
+  category_name: string | null;
+  is_business: number;
+  sync_type: string | null;
+  sync_sent_at: number | null;
+  sync_failed_at: number | null;
+};
+
+export async function handleTransactions(
+  req: Request,
+  env: Env,
+  user: SessionUser,
+  ctx?: WorkerContext,
+): Promise<Response> {
+  if (req.method === "GET") return listTransactions(req, env, user);
+  if (req.method === "POST") return createTransaction(req, env, user);
+  if (req.method === "PATCH") return patchTransaction(req, env, user, ctx);
+  return json({ error: "Método no permitido" }, 405);
+}
+
+async function listTransactions(req: Request, env: Env, user: SessionUser): Promise<Response> {
+  const { active } = await activeHousehold(req, env, user.id);
+  if (!active) return json({ error: "NO_HOUSEHOLD" }, 400);
+  const url = new URL(req.url);
+  const sharedOnly =
+    url.searchParams.get("shared") === "1" ||
+    url.searchParams.get("shared") === "true" ||
+    forceSharedOnly(active.name);
+  const limit = clampInt(url.searchParams.get("limit"), 10, 1, MAX_LIMIT);
+  const offset = clampInt(url.searchParams.get("offset"), 0, 0, 100_000);
+  const { where, binds } = buildWhere(url, {
+    householdId: active.id,
+    userId: user.id,
+    sharedOnly,
+    reintegroPayees: env.REINTEGRO_PAYEES,
+  });
+
+  const [page, countRow, periods, categories, members, iogRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT t.id, t.date, t.description_normalized, t.amount_ars, t.amount_usd,
+              t.installment, t.is_payment, t.ownership, t.paid_by_user_id, t.source,
+              t.linked_transaction_id, t.bank, t.category_id,
+              c.slug AS category_slug, c.name AS category_name,
+              t.is_business, sx.type AS sync_type, sx.sent_at AS sync_sent_at,
+              sx.failed_at AS sync_failed_at
+       FROM transactions t
+       LEFT JOIN categories c ON c.id = t.category_id
+       ${OUTBOX_LATEST_JOIN}
+       WHERE ${where}
+       ORDER BY
+         CASE WHEN t.linked_transaction_id IS NOT NULL AND IFNULL(t.source, '') != 'invoice_iog' THEN 0 ELSE 1 END,
+         t.date DESC, t.id DESC
+       LIMIT ? OFFSET ?`,
+    )
+      .bind(...binds, limit, offset)
+      .all<TxRow>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS n
+       FROM transactions t
+       LEFT JOIN categories c ON c.id = t.category_id
+       WHERE ${where}`,
+    )
+      .bind(...binds)
+      .first<{ n: number }>(),
+    env.DB.prepare(
+      `SELECT DISTINCT substr(t.date, 1, 7) AS period
+       FROM transactions t
+       WHERE t.household_id = ?
+         AND ${sharedOnly ? "t.ownership = 'shared'" : "(t.ownership = 'shared' OR t.paid_by_user_id = ?)"}
+       ORDER BY period DESC`,
+    )
+      .bind(...(sharedOnly ? [active.id] : [active.id, user.id]))
+      .all<{ period: string }>(),
+    listVisibleCategories(env, active.id),
+    listMembers(env, active.id),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM transactions t
+       WHERE t.household_id = ?
+         AND t.linked_transaction_id IS NOT NULL
+         AND IFNULL(t.source, '') != 'invoice_iog'
+         AND ${sharedOnly ? "t.ownership = 'shared'" : "(t.ownership = 'shared' OR t.paid_by_user_id = ?)"}`,
+    )
+      .bind(...(sharedOnly ? [active.id] : [active.id, user.id]))
+      .first<{ n: number }>(),
+  ]);
+
+  const rows = page.results ?? [];
+  const receipts = await receiptsFor(env, rows.map((row) => row.id));
+  const transactions = rows.map((row) => {
+    const receipt = receipts.get(row.id) ?? null;
+    const category = row.category_id
+      ? {
+          id: row.category_id,
+          slug: row.category_slug ?? "uncategorized",
+          name: row.category_name ?? "Sin categoría",
+        }
+      : null;
+    return {
+      id: row.id,
+      date: row.date,
+      descriptionNormalized: row.description_normalized,
+      amountArs: row.amount_ars != null ? num(row.amount_ars) : null,
+      amountUsd: row.amount_usd != null ? num(row.amount_usd) : null,
+      installment: row.installment,
+      isPayment: Boolean(row.is_payment),
+      ownership: row.ownership === "shared" ? "shared" : "personal",
+      paidByUserId: row.paid_by_user_id,
+      source: row.source,
+      linkedTransactionId: row.linked_transaction_id,
+      linkedToInvoiceIog: Boolean(row.linked_transaction_id) && row.source !== "invoice_iog",
+      bank: row.bank,
+      category,
+      hasTicket: Boolean(receipt) || row.source === "receipt",
+      receipt,
+      canEdit: row.ownership === "shared" || row.paid_by_user_id === user.id,
+      isBusiness: Boolean(row.is_business),
+      syncStatus: syncStatusFromOutbox(row),
+    };
+  });
+
+  return json({
+    transactions,
+    total: num(countRow?.n),
+    limit,
+    offset,
+    periods: (periods.results ?? []).map((row) => row.period).filter(Boolean),
+    categories,
+    members,
+    viewerUserId: user.id,
+    iogCount: num(iogRow?.n),
+    householdId: active.id,
+    householdName: active.name,
+  });
+}
+
+function buildWhere(
+  url: URL,
+  scope: { householdId: string; userId: string; sharedOnly: boolean; reintegroPayees?: string },
+): { where: string; binds: unknown[] } {
+  const binds: unknown[] = [];
+  const ph = (value: unknown) => {
+    binds.push(value);
+    return "?";
+  };
+  const parts = [
+    `t.household_id = ${ph(scope.householdId)}`,
+    consumosVisibleSql(scope.reintegroPayees),
+  ];
+  if (scope.sharedOnly) parts.push("t.ownership = 'shared'");
+  else parts.push(`(t.ownership = 'shared' OR t.paid_by_user_id = ${ph(scope.userId)})`);
+
+  const ownership = url.searchParams.get("ownership");
+  if (ownership === "personal" || ownership === "shared") {
+    parts.push(`t.ownership = ${ph(ownership)}`);
+  }
+  const period = url.searchParams.get("period");
+  const q = (url.searchParams.get("q") ?? "").trim().slice(0, 80);
+  if (period && !q) {
+    const range = periodRange(period);
+    if (range) {
+      parts.push(`t.date >= ${ph(range.start)} AND t.date < ${ph(range.end)}`);
+    }
+  }
+  const categoryId = url.searchParams.get("categoryId");
+  if (categoryId) parts.push(`t.category_id = ${ph(categoryId)}`);
+  if (url.searchParams.get("uncategorized") === "1") {
+    parts.push("(t.category_id IS NULL OR c.slug = 'uncategorized')");
+  }
+  const ticket = url.searchParams.get("ticket");
+  if (ticket === "ticket") {
+    parts.push(
+      "(t.source = 'receipt' OR EXISTS (SELECT 1 FROM receipts r WHERE r.transaction_id = t.id))",
+    );
+  } else if (ticket === "no-ticket") {
+    parts.push(
+      "(IFNULL(t.source, '') != 'receipt' AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.transaction_id = t.id))",
+    );
+  }
+  const currency = url.searchParams.get("currency");
+  if (currency === "ars") parts.push("ABS(CAST(IFNULL(t.amount_ars, '0') AS REAL)) > 0");
+  else if (currency === "usd") parts.push("ABS(CAST(IFNULL(t.amount_usd, '0') AS REAL)) > 0");
+  if (url.searchParams.get("iog") === "1") {
+    parts.push("t.linked_transaction_id IS NOT NULL AND IFNULL(t.source, '') != 'invoice_iog'");
+  }
+  if (q) {
+    const needle = `%${q.toUpperCase().replaceAll("%", "").replaceAll("_", "")}%`;
+    const onlyDigits = digitsOf(q);
+    const ors = [`upper(t.description_normalized) LIKE ${ph(needle)}`];
+    if (onlyDigits) {
+      const digitNeedle = `%${onlyDigits}%`;
+      ors.push(
+        `replace(replace(replace(IFNULL(t.amount_ars, ''), '.', ''), ',', ''), '-', '') LIKE ${ph(digitNeedle)}`,
+      );
+      ors.push(
+        `replace(replace(replace(IFNULL(t.amount_usd, ''), '.', ''), ',', ''), '-', '') LIKE ${ph(digitNeedle)}`,
+      );
+    }
+    parts.push(`(${ors.join(" OR ")})`);
+  }
+  return { where: parts.join(" AND "), binds };
+}
+
+async function receiptsFor(env: Env, ids: string[]) {
+  const map = new Map<string, {
+    id: string;
+    merchantName: string | null;
+    receiptDate: string | null;
+    totalArs: number | null;
+    items: Array<{
+      id: string;
+      name: string;
+      quantity: number | null;
+      unitPrice: number | null;
+      lineTotal: number | null;
+      productCategory: string | null;
+    }>;
+  }>();
+  if (ids.length === 0) return map;
+  const placeholders = ids.map(() => "?").join(", ");
+  const receipts = await env.DB.prepare(
+    `SELECT id, transaction_id, merchant_name, receipt_date, total_ars
+     FROM receipts WHERE transaction_id IN (${placeholders})`,
+  )
+    .bind(...ids)
+    .all<{
+      id: string;
+      transaction_id: string;
+      merchant_name: string | null;
+      receipt_date: string | null;
+      total_ars: string | null;
+    }>();
+  const found = receipts.results ?? [];
+  if (found.length === 0) return map;
+  const receiptIds = found.map((row) => row.id);
+  const itemPlaceholders = receiptIds.map(() => "?").join(", ");
+  const items = await env.DB.prepare(
+    `SELECT id, receipt_id, name, quantity, unit_price, line_total, product_category
+     FROM receipt_items WHERE receipt_id IN (${itemPlaceholders})`,
+  )
+    .bind(...receiptIds)
+    .all<{
+      id: string;
+      receipt_id: string;
+      name: string;
+      quantity: string | null;
+      unit_price: string | null;
+      line_total: string | null;
+      product_category: string | null;
+    }>();
+  const byReceipt = new Map<string, Array<{
+    id: string;
+    name: string;
+    quantity: number | null;
+    unitPrice: number | null;
+    lineTotal: number | null;
+    productCategory: string | null;
+  }>>();
+  for (const item of items.results ?? []) {
+    const list = byReceipt.get(item.receipt_id) ?? [];
+    list.push({
+      id: item.id,
+      name: item.name,
+      quantity: item.quantity != null ? num(item.quantity) : null,
+      unitPrice: item.unit_price != null ? num(item.unit_price) : null,
+      lineTotal: item.line_total != null ? num(item.line_total) : null,
+      productCategory: item.product_category,
+    });
+    byReceipt.set(item.receipt_id, list);
+  }
+  for (const receipt of found) {
+    if (!receipt.transaction_id || map.has(receipt.transaction_id)) continue;
+    map.set(receipt.transaction_id, {
+      id: receipt.id,
+      merchantName: receipt.merchant_name,
+      receiptDate: receipt.receipt_date,
+      totalArs: receipt.total_ars != null ? num(receipt.total_ars) : null,
+      items: byReceipt.get(receipt.id) ?? [],
+    });
+  }
+  return map;
+}
+
+async function createTransaction(req: Request, env: Env, user: SessionUser): Promise<Response> {
+  const { active } = await activeHousehold(req, env, user.id);
+  if (!active) return json({ error: "NO_HOUSEHOLD" }, 400);
+  const body = (await req.json().catch(() => null)) as {
+    date?: string;
+    description?: string;
+    amountArs?: number | string | null;
+    amountUsd?: number | string | null;
+    categoryId?: string | null;
+    paidByUserId?: string | null;
+    ownership?: string;
+    bank?: string | null;
+    items?: Array<{
+      name?: string;
+      quantity?: number | null;
+      unitPrice?: number | null;
+      lineTotal?: number | null;
+      productCategory?: string | null;
+    }>;
+  } | null;
+  if (!body) return json({ error: "JSON inválido" }, 400);
+  const date = (body.date ?? "").trim();
+  const description = (body.description ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return json({ error: "Fecha inválida (YYYY-MM-DD)" }, 400);
+  }
+  if (!description) return json({ error: "Falta la descripción" }, 400);
+
+  const items = Array.isArray(body.items) ? body.items.filter((item) => item?.name?.trim()) : [];
+  let amountArs = body.amountArs != null && body.amountArs !== "" ? Math.abs(Number(body.amountArs)) : null;
+  if (amountArs != null && Number.isNaN(amountArs)) amountArs = null;
+  if (items.length > 0 && (amountArs == null || amountArs === 0)) {
+    const sum = items.reduce((acc, item) => {
+      const line = item.lineTotal != null
+        ? Number(item.lineTotal)
+        : item.unitPrice != null && item.quantity != null
+          ? Number(item.unitPrice) * Number(item.quantity)
+          : 0;
+      return acc + (Number.isFinite(line) ? Math.abs(line) : 0);
+    }, 0);
+    if (sum > 0) amountArs = sum;
+  }
+  const amountUsd = body.amountUsd != null && body.amountUsd !== "" ? Math.abs(Number(body.amountUsd)) : null;
+  if (amountArs == null && (amountUsd == null || Number.isNaN(amountUsd))) {
+    return json({ error: "Indicá un monto en $ o USD" }, 400);
+  }
+
+  const members = await listMembers(env, active.id);
+  const paidBy = body.paidByUserId && members.some((m) => m.userId === body.paidByUserId)
+    ? body.paidByUserId
+    : user.id;
+  let categoryId = body.categoryId ?? null;
+  if (categoryId) {
+    const cat = await env.DB.prepare("SELECT id FROM categories WHERE id = ? LIMIT 1")
+      .bind(categoryId)
+      .first<{ id: string }>();
+    if (!cat) categoryId = null;
+  }
+  if (!categoryId && items.length > 0) {
+    categoryId = await categoryIdBySlug(env, "supermercado");
+  }
+  if (!categoryId) categoryId = await categoryIdBySlug(env, "uncategorized");
+
+  const fingerprint = (await sha256Hex(
+    `manual|${date}|${description}|${amountArs ?? ""}|${amountUsd ?? ""}|${Date.now()}|${crypto.randomUUID()}`,
+  )).slice(0, 32);
+  const txId = crypto.randomUUID();
+  const now = Date.now();
+  const amountArsText = amountArs != null ? String(amountArs) : null;
+  const amountUsdText = amountUsd != null && !Number.isNaN(amountUsd) ? String(amountUsd) : null;
+  const ownership = body.ownership === "shared" ? "shared" : "personal";
+  const source = items.length > 0 ? "receipt" : "manual";
+  await env.DB.prepare(
+    `INSERT INTO transactions (
+       id, household_id, date, description_raw, description_normalized,
+       amount_ars, amount_usd, category_id, ownership, paid_by_user_id,
+       external_fingerprint, source, bank, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      txId,
+      active.id,
+      date,
+      description,
+      description,
+      amountArsText,
+      amountUsdText,
+      categoryId,
+      ownership,
+      paidBy,
+      fingerprint,
+      source,
+      normalizeBank(body.bank),
+      now,
+      now,
+    )
+    .run();
+
+  let receipt: { id: string } | null = null;
+  if (items.length > 0) {
+    const receiptId = crypto.randomUUID();
+    const statements = [
+      env.DB.prepare(
+        `INSERT INTO receipts (
+           id, household_id, image_url, merchant_name, receipt_date, total_ars,
+           currency, ocr_raw, status, transaction_id, created_by, created_at
+         ) VALUES (?, ?, 'manual://expense', ?, ?, ?, 'ARS', ?, 'matched', ?, ?, ?)`,
+      ).bind(
+        receiptId,
+        active.id,
+        description,
+        date,
+        amountArsText,
+        JSON.stringify({ source: "manual", items }),
+        txId,
+        user.id,
+        now,
+      ),
+    ];
+    for (const item of items) {
+      const qty = item.quantity != null ? Number(item.quantity) : 1;
+      const unit = item.unitPrice != null ? Number(item.unitPrice) : null;
+      let line = item.lineTotal != null ? Number(item.lineTotal) : null;
+      if (line == null && unit != null && Number.isFinite(qty)) line = unit * qty;
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO receipt_items
+             (id, receipt_id, name, quantity, unit_price, line_total, product_category)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          crypto.randomUUID(),
+          receiptId,
+          item.name!.trim(),
+          Number.isFinite(qty) ? String(qty) : "1",
+          unit != null && Number.isFinite(unit) ? String(unit) : null,
+          line != null && Number.isFinite(line) ? String(line) : null,
+          item.productCategory?.trim() || null,
+        ),
+      );
+    }
+    await env.DB.batch(statements);
+    receipt = { id: receiptId };
+  }
+  return json({
+    transaction: {
+      id: txId,
+      date,
+      descriptionNormalized: description,
+      amountArs,
+      amountUsd: amountUsdText != null ? Number(amountUsdText) : null,
+      ownership,
+      categoryId,
+    },
+    receipt,
+  }, 201);
+}
+
+type TxBefore = {
+  id: string;
+  ownership: string;
+  paid_by_user_id: string | null;
+  category_id: string | null;
+  description_normalized: string;
+  external_fingerprint: string;
+  is_payment: number;
+  is_credit: number;
+  is_business: number;
+  business_version: number | null;
+  date: string;
+  amount_ars: string | null;
+  amount_usd: string | null;
+  category_name: string | null;
+  category_slug: string | null;
+};
+
+async function patchTransaction(
+  req: Request,
+  env: Env,
+  user: SessionUser,
+  ctx?: WorkerContext,
+): Promise<Response> {
+  const { active, list } = await activeHousehold(req, env, user.id);
+  if (!active) return json({ error: "NO_HOUSEHOLD" }, 400);
+  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body || typeof body.id !== "string") return json({ error: "Falta id" }, 400);
+
+  const before = await env.DB.prepare(
+    `SELECT t.id, t.ownership, t.paid_by_user_id, t.category_id, t.description_normalized,
+            t.external_fingerprint, t.is_payment, t.is_credit, t.is_business, t.business_version,
+            t.date, t.amount_ars, t.amount_usd, c.name AS category_name, c.slug AS category_slug
+     FROM transactions t
+     LEFT JOIN categories c ON c.id = t.category_id
+     WHERE t.id = ? AND t.household_id = ?
+     LIMIT 1`,
+  )
+    .bind(body.id, active.id)
+    .first<TxBefore>();
+  if (!before) return json({ error: "No encontrado" }, 404);
+  if (before.ownership !== "shared" && before.paid_by_user_id !== user.id) {
+    return json({ error: "Sin permiso" }, 403);
+  }
+
+  const targetHouseholdId = typeof body.targetHouseholdId === "string" ? body.targetHouseholdId.trim() : "";
+  const wantsPersonalMove = body.ownership === "personal" && !targetHouseholdId;
+  if (targetHouseholdId && targetHouseholdId !== active.id) {
+    return moveTransaction(env, user, before, active.id, targetHouseholdId, list, ctx);
+  }
+  if (wantsPersonalMove) {
+    const personal = list.find((row) => isPersonalName(row.name) && row.id !== active.id);
+    if (personal) return moveTransaction(env, user, before, active.id, personal.id, list, ctx);
+  }
+
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  const set = (column: string, value: unknown) => {
+    sets.push(`${column} = ?`);
+    binds.push(value);
+  };
+
+  if ("categoryId" in body) set("category_id", body.categoryId || null);
+  if (body.ownership === "personal" || body.ownership === "shared") {
+    set("ownership", body.ownership);
+    if (body.ownership === "personal") set("paid_by_user_id", user.id);
+  }
+  if ("paidByUserId" in body && body.ownership !== "personal") {
+    set("paid_by_user_id", typeof body.paidByUserId === "string" ? body.paidByUserId : null);
+  }
+  if ("date" in body && typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+    set("date", body.date);
+  }
+  if (typeof body.description === "string" && body.description.trim()) {
+    const description = [...body.description.trim()].slice(0, 500).join("");
+    set("description_normalized", description);
+    set("description_raw", description);
+  }
+  if ("amountArs" in body) set("amount_ars", moneyOrNull(body.amountArs));
+  if ("amountUsd" in body) set("amount_usd", moneyOrNull(body.amountUsd));
+  if ("bank" in body) set("bank", normalizeBank(typeof body.bank === "string" ? body.bank : null));
+  if ("splitPct" in body && typeof body.splitPct === "number") set("split_pct", body.splitPct);
+  if (body.isPayment === true || body.isPayment === false) set("is_payment", body.isPayment ? 1 : 0);
+
+  const wantsInternal = body.internalTransfer === true || body.internalTransfer === 1 || body.internalTransfer === "true";
+  const wantsReintegro = body.householdReimbursement === true || body.householdReimbursement === 1 || body.householdReimbursement === "true";
+  const wantsCubierto = body.householdBillCovered === true || body.householdBillCovered === 1 || body.householdBillCovered === "true";
+  if (wantsInternal || wantsReintegro || wantsCubierto) set("is_payment", 1);
+  if (wantsInternal && !("categoryId" in body)) {
+    const internal = await categoryIdBySlug(env, "transferencia-interna");
+    if (internal) set("category_id", internal);
+    set("is_credit", 0);
+  }
+
+  const now = Date.now();
+  const nextIsPayment =
+    wantsInternal || wantsReintegro || wantsCubierto || body.isPayment === true
+      ? 1
+      : body.isPayment === false
+        ? 0
+        : before.is_payment;
+  const nextOwnership =
+    body.ownership === "personal" || body.ownership === "shared" ? body.ownership : before.ownership;
+  const syncFields =
+    "date" in body ||
+    "amountArs" in body ||
+    "amountUsd" in body ||
+    "categoryId" in body ||
+    typeof body.description === "string";
+  const mark = body.isBusiness === true ? true : body.isBusiness === false ? false : null;
+  const action = resolveBusinessAction({
+    isBusiness: before.is_business,
+    businessVersion: before.business_version,
+    mark,
+    nextIsPayment,
+    nextOwnership,
+    syncFields,
+    now,
+  });
+  if (action.kind === "reject") return json({ error: action.error }, action.status);
+
+  let nextCategoryName = before.category_name;
+  let nextCategorySlug = before.category_slug;
+  if ("categoryId" in body && !body.categoryId) {
+    nextCategoryName = null;
+    nextCategorySlug = null;
+  } else if (
+    action.kind === "upsert" &&
+    typeof body.categoryId === "string" &&
+    body.categoryId !== before.category_id
+  ) {
+    const cat = await env.DB.prepare(
+      "SELECT name, slug FROM categories WHERE id = ? LIMIT 1",
+    )
+      .bind(body.categoryId)
+      .first<{ name: string; slug: string }>();
+    nextCategoryName = cat?.name ?? null;
+    nextCategorySlug = cat?.slug ?? null;
+  }
+
+  let draft: OutboxDraft | null = null;
+  if (action.kind === "upsert" || action.kind === "delete") {
+    const eventId = crypto.randomUUID();
+    const outboxId = crypto.randomUUID();
+    if (action.kind === "delete") {
+      draft = {
+        id: outboxId,
+        txId: before.id,
+        eventId,
+        type: "delete",
+        payload: buildDeletePayload({
+          eventId,
+          sourceId: before.id,
+          version: action.version,
+        }),
+        createdAt: now,
+      };
+    } else {
+      const nextDate =
+        "date" in body && typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
+          ? body.date
+          : before.date;
+      const nextDescription =
+        typeof body.description === "string" && body.description.trim()
+          ? [...body.description.trim()].slice(0, 500).join("")
+          : before.description_normalized;
+      const built = buildUpsertPayload({
+        eventId,
+        sourceId: before.id,
+        version: action.version,
+        occurredAt: nextDate,
+        isCredit: wantsInternal ? 0 : before.is_credit,
+        amountArs: "amountArs" in body ? moneyOrNull(body.amountArs) : before.amount_ars,
+        amountUsd: "amountUsd" in body ? moneyOrNull(body.amountUsd) : before.amount_usd,
+        description: nextDescription,
+        categoryName: nextCategoryName,
+        categorySlug: nextCategorySlug,
+      });
+      if (!built.ok) return json({ error: built.error }, 400);
+      draft = {
+        id: outboxId,
+        txId: before.id,
+        eventId,
+        type: "upsert",
+        payload: built.body,
+        createdAt: now,
+      };
+    }
+    set("is_business", action.isBusiness);
+    set("business_version", action.version);
+  }
+
+  if (sets.length > 0) {
+    set("updated_at", now);
+    const update = env.DB.prepare(
+      `UPDATE transactions SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
+    ).bind(...binds, before.id, active.id);
+    if (draft) {
+      await env.DB.batch([update, ...enqueueOutboxStatements(env.DB, draft)]);
+      const push = flushOutbox(env, [draft.id]);
+      if (ctx) ctx.waitUntil(push);
+      else void push;
+    } else {
+      await update.run();
+    }
+  }
+
+  let similarUpdated = 0;
+  let similarCount = 0;
+  const categoryId = typeof body.categoryId === "string" ? body.categoryId : null;
+  const applyToSimilar = body.applyToSimilar === true || body.applyToSimilar === 1 || body.applyToSimilar === "true";
+  if (categoryId && before.description_normalized && (categoryId !== before.category_id || applyToSimilar)) {
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM transactions
+       WHERE household_id = ? AND description_normalized = ?`,
+    )
+      .bind(active.id, before.description_normalized)
+      .first<{ n: number }>();
+    similarCount = num(count?.n);
+    if (applyToSimilar) {
+      const updated = await env.DB.prepare(
+        `UPDATE transactions SET category_id = ?, updated_at = ?
+         WHERE household_id = ? AND description_normalized = ? AND id != ?`,
+      )
+        .bind(categoryId, now, active.id, before.description_normalized, before.id)
+        .run();
+      similarUpdated = num(updated.meta?.changes);
+    }
+  }
+
+  let reintegroCount = 0;
+  let cubiertoCount = 0;
+  if ((wantsReintegro || wantsCubierto) && before.description_normalized) {
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM transactions
+       WHERE household_id = ? AND description_normalized = ?`,
+    )
+      .bind(active.id, before.description_normalized)
+      .first<{ n: number }>();
+    const n = num(count?.n);
+    if (wantsReintegro) reintegroCount = n;
+    if (wantsCubierto) cubiertoCount = n;
+    if (applyToSimilar) {
+      const updated = await env.DB.prepare(
+        `UPDATE transactions SET is_payment = 1, updated_at = ?
+         WHERE household_id = ? AND description_normalized = ? AND id != ?`,
+      )
+        .bind(now, active.id, before.description_normalized, before.id)
+        .run();
+      similarUpdated = num(updated.meta?.changes);
+      similarCount = n;
+    }
+  }
+
+  return json({
+    ok: true,
+    learned: 0,
+    similarUpdated,
+    similarCount,
+    reintegroCount,
+    cubiertoCount,
+    appliedToSimilar: applyToSimilar,
+    moved: false,
+    householdReimbursement: wantsReintegro,
+    householdBillCovered: wantsCubierto,
+  });
+}
+
+async function moveTransaction(
+  env: Env,
+  user: SessionUser,
+  before: TxBefore,
+  fromId: string,
+  toId: string,
+  list: Array<{ id: string; name: string }>,
+  ctx?: WorkerContext,
+): Promise<Response> {
+  const dest = list.find((row) => row.id === toId);
+  if (!dest) return json({ error: "No pertenecés a ese hogar" }, 403);
+  const ownership = isPersonalName(dest.name) ? "personal" : "shared";
+  const now = Date.now();
+  const clearBusiness = before.is_business === 1;
+  try {
+    const version = clearBusiness
+      ? resolveBusinessAction({
+          isBusiness: 1,
+          businessVersion: before.business_version,
+          mark: false,
+          nextIsPayment: before.is_payment,
+          nextOwnership: "personal",
+          syncFields: false,
+          now,
+        })
+      : null;
+    const update = clearBusiness
+      ? env.DB.prepare(
+          `UPDATE transactions
+           SET household_id = ?, ownership = ?, paid_by_user_id = ?, updated_at = ?,
+               is_business = 0, business_version = ?
+           WHERE id = ? AND household_id = ?`,
+        ).bind(
+          toId,
+          ownership,
+          user.id,
+          now,
+          version && version.kind === "delete" ? version.version : now,
+          before.id,
+          fromId,
+        )
+      : env.DB.prepare(
+          `UPDATE transactions
+           SET household_id = ?, ownership = ?, paid_by_user_id = ?, updated_at = ?
+           WHERE id = ? AND household_id = ?`,
+        ).bind(toId, ownership, user.id, now, before.id, fromId);
+    if (clearBusiness && version && version.kind === "delete") {
+      const eventId = crypto.randomUUID();
+      const draft: OutboxDraft = {
+        id: crypto.randomUUID(),
+        txId: before.id,
+        eventId,
+        type: "delete",
+        payload: buildDeletePayload({
+          eventId,
+          sourceId: before.id,
+          version: version.version,
+        }),
+        createdAt: now,
+      };
+      await env.DB.batch([update, ...enqueueOutboxStatements(env.DB, draft)]);
+      const push = flushOutbox(env, [draft.id]);
+      if (ctx) ctx.waitUntil(push);
+      else void push;
+    } else {
+      await update.run();
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    if (/UNIQUE|constraint/i.test(message)) {
+      return json({ error: "Ese movimiento ya existe en el hogar destino" }, 409);
+    }
+    return json({ error: "No se pudo mover" }, 500);
+  }
+  return json({
+    ok: true,
+    moved: true,
+    targetHouseholdId: toId,
+    learned: 0,
+    similarUpdated: 0,
+    similarCount: 0,
+    appliedToSimilar: false,
+  });
+}
+
+async function categoryIdBySlug(env: Env, slug: string): Promise<string | null> {
+  const row = await env.DB.prepare(
+    "SELECT id FROM categories WHERE slug = ? AND household_id IS NULL LIMIT 1",
+  )
+    .bind(slug)
+    .first<{ id: string }>();
+  return row?.id ?? null;
+}
+
+function moneyOrNull(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return String(n);
+}
+
+function clampInt(raw: string | null, fallback: number, min: number, max: number): number {
+  const n = raw == null ? fallback : Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
+function digitsOf(value: string): string {
+  let out = "";
+  for (const ch of value) {
+    if (ch >= "0" && ch <= "9") out += ch;
+  }
+  return out;
+}

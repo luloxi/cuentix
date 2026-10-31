@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cuentix",
+  "account_id": "124b4210ff80c15610ed109083a5cf95",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "routes": [{ "pattern": "cuentix.lulox.com.ar", "custom_domain": true }],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "r2_buckets": [
+    {
+      "binding": "RECEIPTS",
+      "bucket_name": "cuentix-receipts"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cuentix",
+      "database_id": "8e01c6ca-8f0d-4753-9eb6-a745963bfc87",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "NEXT_PUBLIC_APP_URL": "https://cuentix.lulox.com.ar",
+    "AUTH_URL": "https://cuentix.lulox.com.ar",
+    "BETTER_AUTH_URL": "https://cuentix.lulox.com.ar"
+  },
+  "observability": { "enabled": true }
+}

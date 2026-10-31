@@ -1,0 +1,7 @@
+{
+  "secret": "test-secret-not-real",
+  "timestamp": "1700000000000",
+  "nonce": "00112233445566778899aabbccddeeff",
+  "body": "{\"v\":1,\"event_id\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"type\":\"upsert\",\"source\":\"cuentix\",\"source_id\":\"vector-tx-1\",\"version\":1700000000000,\"occurred_at\":\"2023-11-14\",\"kind\":\"expense\",\"amount_minor\":12345,\"currency\":\"ARS\",\"description\":\"Cafe con leche\",\"category\":\"Insumos\"}",
+  "signature": "v1=05f370aace28976a8226bd43199bc46f8cc1812c192b1d563777e633b7bdc1e3"
+}

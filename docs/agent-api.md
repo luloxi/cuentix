@@ -1,0 +1,174 @@
+# Agent API + MCP remoto (token por hogar)
+
+Cuentix expone los mismos datos del hogar por:
+
+1. **HTTP Agent API** (`/api/agent/*`) — ideal para `curl` / scripts.
+2. **MCP remoto** (`/api/mcp`) — Streamable HTTP para grok.com, Cursor u otros clientes MCP.
+
+Ambos usan el **token del hogar** (Bearer) y la misma lógica (no inventan números). La PWA sigue con cookie de sesión; esto es para máquinas / IAs.
+
+UI de setup (español): **`/mcp`** en la PWA (`https://cuentix.lulox.com.ar/mcp`).
+
+Polar (suscripción por hogar) y monotributo **no** se implementan acá: primero token por hogar, después Polar, después monotributo.
+
+## Auth
+
+```
+Authorization: Bearer <token del hogar>
+```
+
+El token se genera en la PWA (`/mcp`), se guarda **hasheado** y se muestra **una sola vez**. Resuelve siempre a **ese** `household_id`: el hogar A no ve al B.
+
+Cookie login sigue para la PWA. Bearer es para agentes / MCP.
+
+### Cómo mintar un token del hogar
+
+1. Entrá a la PWA con tu usuario (sesión).
+2. Andá a **https://cuentix.lulox.com.ar/mcp** (también hay un atajo “Token MCP” en Hogar).
+3. Tocá **Generar token del hogar**. Copiá el valor ahora: no se vuelve a mostrar.
+4. Pegalo en grok.com / Grok CLI / Cursor como `Authorization: Bearer …` (en la config del MCP, **no** en el chat).
+5. Si se filtró o lo perdiste: **Rotar** (invalida el anterior) o **Revocar**.
+
+`POST /api/household/agent-token` (sesión, no Bearer) con `{ "action": "create" | "rotate" }` devuelve `{ token, prefix, household }`. `DELETE` revoca.
+
+### Fallback admin/dev (no es el producto)
+
+El secreto de entorno `AGENT_API_TOKEN` sigue andando como **fallback interno**. Mapea al usuario de `AGENT_USER_ID` / `AGENT_USER_EMAIL` y a **su** hogar, no a todos los hogares. No sirve para vender el .com multi-tenant.
+
+| Name | Required | Purpose |
+| --- | --- | --- |
+| `AGENT_API_TOKEN` | no (fallback) | Bearer admin/dev. Mismo valor en Vercel y en el entorno del agente interno. |
+| `AGENT_USER_ID` | optional | `users.id` del hogar de admin/dev (`household_members`). Solo con el fallback global. |
+| `AGENT_USER_EMAIL` | optional | Si `AGENT_USER_ID` falta o no tiene hogar. |
+
+No hay env nuevos para el token por hogar: vive en D1 (hash).
+
+The PWA user must already belong to a household to mint a token.
+If tools return `code: "no_household"`, mint from `/mcp` while logged into that hogar.
+
+## MCP remoto
+
+- **URL:** `https://cuentix.lulox.com.ar/api/mcp`
+- **Transport:** Streamable HTTP (MCP 2025/2026). Stateless on Cloudflare Workers (OpenNext). El host anterior `https://llevacuentas.vercel.app` queda solo como legado.
+- **Auth:** header `Authorization: Bearer <token del hogar>` (no OAuth browser flow).
+
+### Tools
+
+| Tool | Qué hace |
+| --- | --- |
+| `gastos_del_mes` | Totales reales; `period` opcional (`YYYY-MM`, `latest`, o mes actual AR). |
+| `resumen` | Resúmenes importados + períodos + mes actual / último con datos. |
+| `importar_resumen` | Importa Excel/PDF: `fileBase64` + `fileName` (+ `bank`, `kind`). |
+| `listar_cargas` | Historial de cargas (resúmenes, tickets, manuales). |
+
+Todas las tools filtran por el `household_id` del token.
+
+### grok.com / Grok CLI
+
+```bash
+export LLEVACUENTAS_TOKEN="…"   # token del hogar, copiado una vez desde /mcp
+
+grok mcp add --transport http llevacuentas \
+  https://cuentix.lulox.com.ar/api/mcp \
+  --header "Authorization: Bearer ${LLEVACUENTAS_TOKEN}"
+```
+
+O en `~/.grok/config.toml`:
+
+```toml
+[mcp_servers.llevacuentas]
+url = "https://cuentix.lulox.com.ar/api/mcp"
+headers = { Authorization = "Bearer ${LLEVACUENTAS_TOKEN}" }
+```
+
+En grok.com: MCP remoto Streamable HTTP, misma URL, header `Authorization: Bearer …`. No pegues el token en el chat.
+
+### Cursor / cliente genérico
+
+```json
+{
+  "mcpServers": {
+    "llevacuentas": {
+      "url": "https://cuentix.lulox.com.ar/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LLEVACUENTAS_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Metadata RFC 9728 (descubrimiento): `/.well-known/oauth-protected-resource`.
+El flujo esperado es bearer estático, no un Authorization Server interactivo.
+
+## HTTP calls (curl)
+
+Replace `$APP_URL` with the Vercel origin (same host as the PWA).
+`$LLEVACUENTAS_TOKEN` is the household token from `/mcp`.
+
+### 1. Load summary (stored statements + current month)
+
+```bash
+curl -sS -H "Authorization: Bearer $LLEVACUENTAS_TOKEN" \
+  "$APP_URL/api/agent/summary"
+```
+
+### 1b. Import a statement (BBVA / Fiwind Excel, CSV o PDF)
+
+Same parser as the PWA import (`/cargas`). Detects BBVA PDF, generic
+fecha+importe PDF (Fiwind y otros), Excel y CSV (coma o `;`). Si el nombre
+o el contenido dice Fiwind, no se etiqueta como BBVA. Pass `bank=Fiwind` to
+force the label.
+
+Multipart:
+
+```bash
+curl -sS -H "Authorization: Bearer $LLEVACUENTAS_TOKEN" \
+  -F "file=@resumen.xlsx" -F "bank=BBVA" \
+  "$APP_URL/api/agent/import"
+```
+
+JSON (when the agent already has bytes as base64):
+
+```bash
+curl -sS -H "Authorization: Bearer $LLEVACUENTAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fileName":"resumen.xlsx","bank":"BBVA","fileBase64":"<base64>"}' \
+  "$APP_URL/api/agent/import"
+```
+
+### 2. Gastos del mes (real stored totals)
+
+Current calendar month (America/Argentina/Buenos_Aires):
+
+```bash
+curl -sS -H "Authorization: Bearer $LLEVACUENTAS_TOKEN" \
+  "$APP_URL/api/agent/gastos"
+```
+
+A specific month, or the latest month that has data:
+
+```bash
+curl -sS -H "Authorization: Bearer $LLEVACUENTAS_TOKEN" \
+  "$APP_URL/api/agent/gastos?period=2026-08"
+
+curl -sS -H "Authorization: Bearer $LLEVACUENTAS_TOKEN" \
+  "$APP_URL/api/agent/gastos?period=latest"
+```
+
+Read `formatted.headline` plus `totalArs` / `totalUsd` / `totalArsCombined`.
+Empty months return zeros — never invented figures.
+
+`GET /api/agent` (auth required) lists HTTP + MCP and echoes `actingAs.householdId` + `authKind` (`household_token` | `global_token` | `session`).
+
+Bearer also works on the existing PWA routes (`POST /api/import/bbva`,
+`GET /api/stats/mes-a-mes`) if you need the full UI payloads — still scoped
+to the token's household via the acting member.
+
+## PDF genéricos (IA)
+
+Si el PDF no matchea el parser BBVA y está `OPENAI_API_KEY`, el import usa IA (`pdf_ai` / `statement_pdf`). Misma dedupe por `externalFingerprint`.
+
+## Privacidad
+
+Cuando conectás una IA por MCP, los movimientos salen de Cuentix hacia esa IA. No pegues el token del hogar en chats ni en el repo. Polar/suscripción no se toca con este cambio.

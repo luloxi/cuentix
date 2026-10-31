@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cuentix-lite",
+  "account_id": "124b4210ff80c15610ed109083a5cf95",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-30",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/.well-known/*"]
+  },
+  "r2_buckets": [
+    {
+      "binding": "RECEIPTS",
+      "bucket_name": "cuentix-receipts"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cuentix",
+      "database_id": "8e01c6ca-8f0d-4753-9eb6-a745963bfc87",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ai": { "binding": "AI" },
+  "vars": {
+    "NEXT_PUBLIC_APP_URL": "https://cuentix.lulox.com.ar",
+    "AUTH_URL": "https://cuentix.lulox.com.ar",
+    "SERPIX_SYNC_URL": "https://erp.lulox.com.ar/api/integrations/cuentix/events"
+  },
+  "observability": { "enabled": true }
+}

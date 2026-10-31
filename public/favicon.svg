@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Cuentix">
+  <title>Cuentix</title>
+  <rect width="512" height="512" fill="#000000"/>
+  <defs>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="170" y1="150" x2="360" y2="360">
+      <stop offset="0" stop-color="#FD48B3"/>
+      <stop offset="0.5" stop-color="#7C91F7"/>
+      <stop offset="1" stop-color="#59A1FB"/>
+    </linearGradient>
+  </defs>
+  <path d="M 307 156 A 124 124 0 1 0 307 356" fill="none" stroke="url(#brand)" stroke-width="68" stroke-linecap="round"/>
+  <path d="M 320 240 L 362 292 L 420 200" fill="none" stroke="#F6CD35" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
