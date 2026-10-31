@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { parseStatementWorkbook } from "@/lib/bbva/parse";
@@ -13,11 +14,14 @@ import { logicalExpenseKey } from "@/lib/import/dedupe";
 import { isExpenseRow } from "@/lib/stats/monthly-expenses";
 import {
   computeCardDebt,
+  debtFigure,
   groupOpenInstallments,
   INCOMPLETE_LEDGER_ARS,
   parseInstallment,
   type DebtTx,
 } from "./debt";
+import { debtTxFromRow, type DebtSqlRow } from "../../../worker/debt";
+import { DEBT_ROWS_SQL } from "../../../worker/sql";
 
 const FIX = join(process.cwd(), "fixtures/bbva-card");
 
@@ -565,5 +569,100 @@ describe("strict dedupe", () => {
     assert.deepEqual(keysA, keysB);
     const fps = new Set(a.movements.map((m) => m.fingerprint));
     assert.equal(fps.size, a.movements.length);
+  });
+});
+
+describe("closed statements feed computeCardDebt", () => {
+  it("excludes closed statement rows, counts open ones, and force_settled is zero", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const file of [
+      "0001_app.sql",
+      "0002_auth.sql",
+      "0003_serpix_sync.sql",
+      "0004_card_closed.sql",
+    ]) {
+      db.exec(readFileSync(join(process.cwd(), "migrations", file), "utf8"));
+    }
+    db.prepare("INSERT INTO users (id, email, name) VALUES ('user-1', 'a@b.co', 'Ana')").run();
+    db.prepare(
+      "INSERT INTO households (id, name, invite_code) VALUES ('hh-1', 'Personal', 'CODE1234')",
+    ).run();
+    db.prepare(
+      "INSERT INTO household_members (household_id, user_id, role, joined_at) VALUES ('hh-1', 'user-1', 'owner', 1)",
+    ).run();
+    db.prepare(
+      `INSERT INTO card_statements (id, household_id, source, status, row_count)
+       VALUES ('st-open', 'hh-1', 'bbva_xlsx', 'open', 1),
+              ('st-closed', 'hh-1', 'bbva_xlsx', 'closed', 1)`,
+    ).run();
+    const insert = db.prepare(
+      `INSERT INTO transactions (
+         id, household_id, statement_id, date, description_raw, description_normalized,
+         amount_ars, external_fingerprint, source, bank, ownership, paid_by_user_id
+       ) VALUES (?, 'hh-1', ?, '2026-09-19', ?, ?, ?, ?, 'bbva_import', 'BBVA', 'personal', 'user-1')`,
+    );
+    insert.run("open-1", "st-open", "TEMBICI", "TEMBICI", "140.00", "fp-open");
+    insert.run("closed-1", "st-closed", "ECOBICI", "ECOBICI", "880.00", "fp-closed");
+
+    const loaded = (
+      db.prepare(DEBT_ROWS_SQL).all("user-1") as DebtSqlRow[]
+    ).map(debtTxFromRow);
+    const openRow = loaded.find((row) => row.id === "open-1");
+    const closedRow = loaded.find((row) => row.id === "closed-1");
+    assert.equal(openRow?.statementClosed, false);
+    assert.equal(closedRow?.statementClosed, true);
+
+    const debt = computeCardDebt(loaded, {
+      userId: "user-1",
+      settings: { saldoDeudaArs: null, saldoDeudaUsd: null },
+    });
+    assert.deepEqual(
+      debt.openCharges.map((charge) => charge.id),
+      ["open-1"],
+    );
+    assert.equal(debt.openCharges[0]?.amountArs, 140);
+    assert.equal(
+      debt.openCharges.some((charge) => charge.id === "closed-1"),
+      false,
+    );
+
+    const forced = computeCardDebt(loaded, {
+      userId: "user-1",
+      settings: { forceSettled: true, saldoDeudaArs: 5000, saldoDeudaUsd: 20 },
+    });
+    assert.equal(forced.currentBalanceArs, 0);
+    assert.equal(forced.currentBalanceUsd, 0);
+    assert.equal(forced.openCharges.length, 0);
+
+    assert.deepEqual(
+      debtFigure({
+        forceSettled: true,
+        saldoArs: 5000,
+        saldoUsd: 20,
+        closedStatements: 1,
+        openStatements: 1,
+      }),
+      { balanceArs: 0, balanceUsd: 0, settled: true },
+    );
+    assert.deepEqual(
+      debtFigure({
+        forceSettled: false,
+        saldoArs: 5000,
+        saldoUsd: 20,
+        closedStatements: 22,
+        openStatements: 0,
+      }),
+      { balanceArs: 0, balanceUsd: 0, settled: true },
+    );
+    const mixed = debtFigure({
+      forceSettled: false,
+      saldoArs: 5000,
+      saldoUsd: 20,
+      closedStatements: 22,
+      openStatements: 19,
+    });
+    assert.equal(mixed.balanceArs, 5000);
+    assert.equal(mixed.balanceUsd, 20);
   });
 });

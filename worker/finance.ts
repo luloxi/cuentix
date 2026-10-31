@@ -15,7 +15,7 @@ import { loadFx, monthEndBuy } from "./fx";
 import { activeHousehold, forceSharedOnly } from "./household";
 import { sumIncomeArs } from "./income";
 import { json, num, periodRange, shiftPeriod, todayAr } from "./http";
-import { ARS_EXPR, EXPENSE_SQL } from "./sql";
+import { ARS_EXPR, CLOSED_STATEMENT_SQL, EXPENSE_SQL } from "./sql";
 
 const EVM = /^0x[a-fA-F0-9]{40}$/;
 
@@ -31,6 +31,8 @@ type SavingsRow = {
 };
 
 type DebtRow = {
+  closed_statements?: number | null;
+  open_statements?: number | null;
   force_settled: number | null;
   saldo_deuda_ars: string | null;
   saldo_deuda_usd: string | null;
@@ -490,6 +492,8 @@ function debtReading(row: DebtRow | null) {
     saldoArs: row?.saldo_deuda_ars == null ? null : num(row.saldo_deuda_ars),
     saldoUsd: row?.saldo_deuda_usd == null ? null : num(row.saldo_deuda_usd),
     cardLast4: row?.card_last4 ?? null,
+    closedStatements: num(row?.closed_statements),
+    openStatements: num(row?.open_statements),
   });
 }
 
@@ -635,7 +639,13 @@ function summarize(rows: SavingsRow[], blue: number | null) {
 async function debtRow(env: Env, userId: string): Promise<DebtRow | null> {
   return env.DB.prepare(
     `SELECT force_settled, saldo_deuda_ars, saldo_deuda_usd, card_last4,
-            rate_pct, min_payment_ars, due_day, notes, cleared_at, updated_at
+            rate_pct, min_payment_ars, due_day, notes, cleared_at, updated_at,
+            (SELECT COUNT(*) FROM card_statements cs
+               INNER JOIN household_members hm ON hm.household_id = cs.household_id
+              WHERE hm.user_id = debt_settings.user_id AND ${CLOSED_STATEMENT_SQL}) AS closed_statements,
+            (SELECT COUNT(*) FROM card_statements cs
+               INNER JOIN household_members hm ON hm.household_id = cs.household_id
+              WHERE hm.user_id = debt_settings.user_id AND NOT (${CLOSED_STATEMENT_SQL})) AS open_statements
      FROM debt_settings WHERE user_id = ?`,
   )
     .bind(userId)

@@ -501,6 +501,9 @@ export function TransactionsTable() {
         setReintegroPrompt(null);
         setToast("Guardado.");
       }
+      if (data?.possibleDuplicate) {
+        setToast("Posible duplicado: ya hay un gasto igual ese día. Se guardó igual.");
+      }
     } catch {
       setRows(prev); setError("Error de red al guardar");
     } finally {
@@ -1137,7 +1140,11 @@ export function TransactionsTable() {
           }}
         />
       ) : (
-        toast && <Toast>{toast}</Toast>
+        toast && (
+          <Toast tone={toast.startsWith("Posible duplicado") ? "warn" : "ok"}>
+            {toast}
+          </Toast>
+        )
       )}
 
       {loading && !rows.length ? (

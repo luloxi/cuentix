@@ -91,13 +91,17 @@ export function readDebt(input: {
   saldoArs: number | null;
   saldoUsd: number | null;
   cardLast4: string | null;
+  /** card_statements for the user's households (status closed / not closed). */
+  closedStatements?: number;
+  openStatements?: number;
 }): DebtReading {
-  if (input.forceSettled) {
+  const allClosed = (input.closedStatements ?? 0) > 0 && (input.openStatements ?? 0) === 0;
+  if (input.forceSettled || allClosed) {
     return {
       balanceArs: 0,
       balanceUsd: 0,
       settled: true,
-      forceSettled: true,
+      forceSettled: input.forceSettled,
       activeCard: false,
       cardStatus: "sin_tarjeta_activa",
     };

@@ -13,6 +13,34 @@ import { isPeriodDebtSource } from "@/lib/import/source";
 /** Below this, Casita shows “Saldada” — only when a snapshot exists. */
 export const SETTLED_THRESHOLD_ARS = 50;
 
+/**
+ * Home deuda figure. `forceSettled` zeros both currencies. So does a card
+ * whose statements are all closed (open history must not keep a stale saldo).
+ * Mixed open/closed statements keep the editable saldo; closed rows are
+ * dropped later by `statementClosed` inside `computeCardDebt`.
+ */
+export function debtFigure(input: {
+  forceSettled: boolean;
+  saldoArs: number | null;
+  saldoUsd: number | null;
+  closedStatements: number;
+  openStatements: number;
+}): { balanceArs: number; balanceUsd: number; settled: boolean } {
+  if (input.forceSettled || (input.closedStatements > 0 && input.openStatements === 0)) {
+    return { balanceArs: 0, balanceUsd: 0, settled: true };
+  }
+  if (input.saldoArs == null && input.saldoUsd == null) {
+    return { balanceArs: 0, balanceUsd: 0, settled: false };
+  }
+  const balanceArs = Math.abs(input.saldoArs ?? 0);
+  const balanceUsd = Math.abs(input.saldoUsd ?? 0);
+  return {
+    balanceArs,
+    balanceUsd,
+    settled: balanceArs < SETTLED_THRESHOLD_ARS,
+  };
+}
+
 /** Lookback from the newest Últimos movimientos date. */
 export const SNAPSHOT_LOOKBACK_DAYS = 21;
 

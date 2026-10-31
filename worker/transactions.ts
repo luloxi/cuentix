@@ -1,8 +1,11 @@
 import { normalizeBank } from "../src/lib/banks";
 import {
+  bumpOccurrenceFingerprint,
   expenseAmountText,
   isCalendarDate,
   manualFingerprintMaterial,
+  nextOccurrenceFingerprint,
+  occurrenceOfFingerprint,
   parseExpenseAmount,
 } from "../src/lib/manual-expense";
 import { queryMatchesBbvaInternalTransferTokens } from "../src/lib/bbva/search-tokens";
@@ -402,21 +405,20 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
 
   const amountArsText = expenseAmountText(amountArs);
   const amountUsdText = expenseAmountText(amountUsd);
-  const fingerprint = (await sha256Hex(
-    manualFingerprintMaterial({
-      householdId: active.id,
-      date,
-      description,
-      amountArs: amountArsText,
-      amountUsd: amountUsdText,
-    }),
-  )).slice(0, 32);
+  const material = manualFingerprintMaterial({
+    householdId: active.id,
+    date,
+    description,
+    amountArs: amountArsText,
+    amountUsd: amountUsdText,
+  });
+  let alloc = await allocateManualFingerprint(env, active.id, material, null);
   const txId = crypto.randomUUID();
   const now = Date.now();
   const ownership = body.ownership === "shared" ? "shared" : "personal";
   const source = items.length > 0 ? "receipt" : "manual";
-  try {
-    await env.DB.prepare(
+  const insertTx = (fingerprint: string) =>
+    env.DB.prepare(
       `INSERT INTO transactions (
          id, household_id, date, description_raw, description_normalized,
          amount_ars, amount_usd, category_id, ownership, paid_by_user_id,
@@ -441,12 +443,30 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
         now,
       )
       .run();
+  try {
+    await insertTx(alloc.fingerprint);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    if (/UNIQUE|constraint/i.test(message)) {
-      return json({ error: "Ese gasto ya está cargado" }, 409);
+    if (!isUniqueConstraint(err)) {
+      if (isConstraint(err)) return json({ error: "Ese gasto ya está cargado" }, 409);
+      throw err;
     }
-    throw err;
+    const again = await allocateManualFingerprint(env, active.id, material, null);
+    const fingerprint =
+      again.fingerprint === alloc.fingerprint
+        ? bumpOccurrenceFingerprint(alloc.base, alloc.fingerprint)
+        : again.fingerprint;
+    alloc = {
+      ...again,
+      fingerprint,
+      possibleDuplicate: true,
+      duplicateOf: again.duplicateOf ?? alloc.duplicateOf,
+    };
+    try {
+      await insertTx(fingerprint);
+    } catch (err2) {
+      if (isConstraint(err2)) return json({ error: "Ese gasto ya está cargado" }, 409);
+      throw err2;
+    }
   }
 
   let receipt: { id: string } | null = null;
@@ -505,6 +525,9 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
       categoryId,
     },
     receipt,
+    ...(alloc.possibleDuplicate
+      ? { possibleDuplicate: true, duplicateOf: alloc.duplicateOf }
+      : {}),
   }, 201);
 }
 
@@ -623,11 +646,18 @@ async function patchTransaction(
     }
     set("split_pct", pct);
   }
+  let alloc: ManualFingerprint | null = null;
+  let fingerprintSlot: number | null = null;
   if (
     (before.source === "manual" || before.source === "receipt") &&
-    (nextDate !== before.date || nextArs !== before.amount_ars || nextUsd !== before.amount_usd)
+    (nextDate !== before.date ||
+      nextArs !== before.amount_ars ||
+      nextUsd !== before.amount_usd ||
+      nextDescription !== before.description_normalized)
   ) {
-    const fingerprint = (await sha256Hex(
+    alloc = await allocateManualFingerprint(
+      env,
+      active.id,
       manualFingerprintMaterial({
         householdId: active.id,
         date: nextDate,
@@ -635,8 +665,10 @@ async function patchTransaction(
         amountArs: nextArs,
         amountUsd: nextUsd,
       }),
-    )).slice(0, 32);
-    set("external_fingerprint", fingerprint);
+      before.id,
+    );
+    fingerprintSlot = binds.length;
+    set("external_fingerprint", alloc.fingerprint);
   }
   if (body.isPayment === true || body.isPayment === false) set("is_payment", body.isPayment ? 1 : 0);
 
@@ -748,12 +780,14 @@ async function patchTransaction(
     set("business_version", action.version);
   }
 
+  let possibleDuplicate = alloc?.possibleDuplicate ?? false;
+  let duplicateOf = alloc?.duplicateOf ?? null;
   if (sets.length > 0) {
     set("updated_at", now);
-    const update = env.DB.prepare(
-      `UPDATE transactions SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
-    ).bind(...binds, before.id, active.id);
-    try {
+    const runUpdate = async () => {
+      const update = env.DB.prepare(
+        `UPDATE transactions SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
+      ).bind(...binds, before.id, active.id);
       if (draft) {
         await env.DB.batch([update, ...enqueueOutboxStatements(env.DB, draft)]);
         const push = flushOutbox(env, [draft.id]);
@@ -762,12 +796,28 @@ async function patchTransaction(
       } else {
         await update.run();
       }
+    };
+    try {
+      await runUpdate();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "";
-      if (/UNIQUE|constraint/i.test(message)) {
-        return json({ error: "Ese gasto ya está cargado" }, 409);
+      if (!(alloc && fingerprintSlot != null && isUniqueConstraint(err))) {
+        if (isConstraint(err)) return json({ error: "Ese gasto ya está cargado" }, 409);
+        throw err;
       }
-      throw err;
+      const again = await allocateManualFingerprint(env, active.id, alloc.material, before.id);
+      let fingerprint = again.fingerprint;
+      if (fingerprint === binds[fingerprintSlot]) {
+        fingerprint = bumpOccurrenceFingerprint(alloc.base, String(fingerprint));
+      }
+      binds[fingerprintSlot] = fingerprint;
+      possibleDuplicate = true;
+      duplicateOf = again.duplicateOf ?? duplicateOf;
+      try {
+        await runUpdate();
+      } catch (err2) {
+        if (isConstraint(err2)) return json({ error: "Ese gasto ya está cargado" }, 409);
+        throw err2;
+      }
     }
   }
 
@@ -829,6 +879,7 @@ async function patchTransaction(
     moved: false,
     householdReimbursement: wantsReintegro,
     householdBillCovered: wantsCubierto,
+    ...(possibleDuplicate ? { possibleDuplicate: true, duplicateOf } : {}),
   });
 }
 
@@ -915,6 +966,60 @@ async function moveTransaction(
     similarCount: 0,
     appliedToSimilar: false,
   });
+}
+
+type ManualFingerprint = {
+  material: string;
+  base: string;
+  fingerprint: string;
+  possibleDuplicate: boolean;
+  duplicateOf: string | null;
+};
+
+function isConstraint(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /UNIQUE|constraint/i.test(message);
+}
+
+function isUniqueConstraint(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /UNIQUE/i.test(message);
+}
+
+async function allocateManualFingerprint(
+  env: Env,
+  householdId: string,
+  material: string,
+  excludeId: string | null,
+): Promise<ManualFingerprint> {
+  const base = (await sha256Hex(material)).slice(0, 32);
+  const res = await env.DB.prepare(
+    `SELECT id, external_fingerprint
+     FROM transactions
+     WHERE household_id = ?
+       AND (? IS NULL OR id <> ?)
+       AND (
+         external_fingerprint = ?
+         OR external_fingerprint GLOB ?
+       )`,
+  )
+    .bind(householdId, excludeId, excludeId, base, `${base}#[0-9]*`)
+    .all<{ id: string; external_fingerprint: string }>();
+  const family = (res.results ?? []).filter(
+    (row) => occurrenceOfFingerprint(row.external_fingerprint, base) != null,
+  );
+  const next = nextOccurrenceFingerprint(
+    base,
+    family.map((row) => row.external_fingerprint),
+  );
+  const baseRow = family.find((row) => row.external_fingerprint === base);
+  return {
+    material,
+    base,
+    fingerprint: next.fingerprint,
+    possibleDuplicate: next.possibleDuplicate,
+    duplicateOf: next.possibleDuplicate ? (baseRow?.id ?? null) : null,
+  };
 }
 
 async function categoryIdBySlug(env: Env, slug: string): Promise<string | null> {

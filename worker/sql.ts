@@ -8,17 +8,36 @@
  * - not a payment, not a credit
  * - not a period-xls / resumen-pdf source (bbva_period, bbva_pdf)
  * - Casita rows linked to Invoice IOG are excluded; invoice_iog itself counts
- * - `BANK_ACCOUNTING_SQL` covers the phrases `isBankAccountingEntry` /
- *   Fiwind tipos use: cuenta tuya, cambio de moneda, pesificación, transf
- *   deuda, compra/venta KO, amount-only tipos, RETIRO, DEPOSITO, CONVERSION,
- *   yields, and wallet TRANSFERENCIA ARS.
- *   The full JS classifier is not run per row.
+ * - `BANK_ACCOUNTING_SQL` keeps the phrase list (cuenta tuya, cambio de
+ *   moneda, pesificación, transf deuda, compra/venta KO, COMPRA/VENTA ME,
+ *   RETIRO, DEPOSITO, CONVERSION, yields, bare TRANSFERENCIA).
+ *   Wallet rows are only the exact codes TRANSFERENCIA ARS|USD|USDC|USDT.
+ *   COMPRA/VENTA of a single wallet code are only USD, USDC, USDT, USDB, ME
+ *   (KO stays on the existing LIKE). COMPRA SUPER, COMPRA MERCADOLIBRE and
+ *   TRANSFERENCIA A <persona> stay spends.
+ *   A numeric-only description (digits and dots) is accounting only as a
+ *   Fiwind echo: bank = 'Fiwind' and another non-numeric row in the same
+ *   household within 2 days (`julianday`) shares the ARS amount (abs diff
+ *   < 0.01) or the USD amount (abs diff < 0.005). The amount compared has to
+ *   be non-zero so two empty amounts do not count as an echo. Unpaired
+ *   numeric rows stay counted. JS `isBankAccountingEntry` still treats every
+ *   amount-only tipo as accounting; that difference is intentional.
+ *   The echo lookup filters `echo.household_id` plus a sargable date window,
+ *   which uses `tx_household_date_idx` from migration 0001. No extra index.
  *
  * Consumos shows real spends plus internal transfers and the payment
  * exceptions in `isConsumosHiddenPayment`. Other bank-accounting lines
- * (numeric Fiwind tipos, pesificación, Retiro) stay out of the list, matching
- * `listTransactions` in src/lib/transactions.ts.
+ * (paired numeric Fiwind echos, pesificación, Retiro) stay out of the list.
+ * Unpaired numeric descriptions stay visible, unlike the legacy JS filter.
  */
+
+/** Digits and dots only, so "59900" and "449536.14" match and "Pago a DIA" does not. */
+function numericDescriptionSql(alias: string): string {
+  return `(
+    upper(trim(${alias}.description_normalized)) GLOB '[0-9]*'
+    AND upper(trim(${alias}.description_normalized)) NOT GLOB '*[^0-9.]*'
+  )`;
+}
 
 /** True when the description is bank accounting (not a household spend). */
 export const BANK_ACCOUNTING_SQL = `(
@@ -64,29 +83,44 @@ export const BANK_ACCOUNTING_SQL = `(
   OR upper(trim(t.description_normalized)) GLOB 'GANANCIA*'
   OR upper(trim(t.description_normalized)) GLOB 'RENDIMIENTO*'
   OR upper(trim(t.description_normalized)) = 'TRANSFERENCIA'
-  OR (
-    upper(trim(t.description_normalized)) GLOB 'TRANSFERENCIA [A-Z0-9.]*'
-    AND instr(substr(upper(trim(t.description_normalized)), 15), ' ') = 0
-    AND length(substr(upper(trim(t.description_normalized)), 15)) BETWEEN 2 AND 10
+  OR upper(trim(t.description_normalized)) IN (
+    'TRANSFERENCIA ARS',
+    'TRANSFERENCIA USD',
+    'TRANSFERENCIA USDC',
+    'TRANSFERENCIA USDT'
+  )
+  OR upper(trim(t.description_normalized)) IN (
+    'COMPRA USD', 'COMPRA USDC', 'COMPRA USDT', 'COMPRA USDB',
+    'VENTA USD', 'VENTA USDC', 'VENTA USDT', 'VENTA USDB'
   )
   OR (
-    (
-      upper(trim(t.description_normalized)) GLOB 'COMPRA [A-Z0-9.]*'
-      OR upper(trim(t.description_normalized)) GLOB 'VENTA [A-Z0-9.]*'
+    t.bank = 'Fiwind'
+    AND ${numericDescriptionSql("t")}
+    AND EXISTS (
+      SELECT 1 FROM transactions echo
+      WHERE echo.household_id = t.household_id
+        AND echo.id <> t.id
+        AND echo.date >= date(t.date, '-2 days')
+        AND echo.date <= date(t.date, '+2 days')
+        AND abs(julianday(echo.date) - julianday(t.date)) <= 2
+        AND NOT ${numericDescriptionSql("echo")}
+        AND (
+          (
+            abs(CAST(IFNULL(t.amount_ars, '0') AS REAL)) >= 0.01
+            AND abs(
+              CAST(IFNULL(echo.amount_ars, '0') AS REAL)
+              - CAST(IFNULL(t.amount_ars, '0') AS REAL)
+            ) < 0.01
+          )
+          OR (
+            abs(CAST(IFNULL(t.amount_usd, '0') AS REAL)) >= 0.005
+            AND abs(
+              CAST(IFNULL(echo.amount_usd, '0') AS REAL)
+              - CAST(IFNULL(t.amount_usd, '0') AS REAL)
+            ) < 0.005
+          )
+        )
     )
-    AND instr(substr(upper(trim(t.description_normalized)), 8), ' ') = 0
-    AND length(
-      substr(
-        upper(trim(t.description_normalized)),
-        instr(upper(trim(t.description_normalized)), ' ') + 1
-      )
-    ) BETWEEN 1 AND 10
-    AND upper(trim(t.description_normalized)) NOT GLOB 'COMPRA SUPER*'
-    AND upper(trim(t.description_normalized)) NOT GLOB 'VENTA SUPER*'
-  )
-  OR (
-    upper(trim(t.description_normalized)) GLOB '[0-9]*'
-    AND upper(trim(t.description_normalized)) NOT GLOB '*[^0-9.]*'
   )
 )`;
 
@@ -158,6 +192,38 @@ export const ARS_EXPR = `
 `;
 
 export const USD_EXPR = `ABS(CAST(IFNULL(t.amount_usd, '0') AS REAL))`;
+
+/**
+ * Linked card statement (`cs`) is closed history. Callers join
+ * `card_statements cs ON cs.id = t.statement_id`.
+ * `worker/finance.ts` on the patrimonio branch should select debt rows
+ * through `DEBT_ROWS_SQL` so `statementClosed` is not left unset.
+ */
+export const CLOSED_STATEMENT_SQL = `IFNULL(cs.status, '') = 'closed'`;
+
+/** One user's transactions, with `statement_closed` from `card_statements.status`. */
+export const DEBT_ROWS_SQL = `
+SELECT
+  t.id AS id,
+  t.date AS date,
+  t.description_normalized AS description_normalized,
+  t.amount_ars AS amount_ars,
+  t.amount_usd AS amount_usd,
+  t.installment AS installment,
+  t.is_payment AS is_payment,
+  t.is_credit AS is_credit,
+  t.ownership AS ownership,
+  t.paid_by_user_id AS paid_by_user_id,
+  t.source AS source,
+  t.bank AS bank,
+  t.card_last4 AS card_last4,
+  t.statement_id AS statement_id,
+  CASE WHEN ${CLOSED_STATEMENT_SQL} THEN 1 ELSE 0 END AS statement_closed
+FROM transactions t
+LEFT JOIN card_statements cs ON cs.id = t.statement_id
+INNER JOIN household_members m ON m.household_id = t.household_id
+WHERE m.user_id = ?
+`;
 
 /** Rows Consumos is allowed to show (payments only when they are special tipos). */
 /** Roommate payee SQL (names come from the REINTEGRO_PAYEES config, never from the repo). */

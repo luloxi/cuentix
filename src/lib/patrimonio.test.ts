@@ -81,6 +81,31 @@ describe("patrimonio series", () => {
     assert.equal(got.assetsUsd, 5);
   });
 
+  it("reads debt as zero when every card statement is closed", () => {
+    const closed = readDebt({
+      forceSettled: false,
+      saldoArs: 120000,
+      saldoUsd: 30,
+      cardLast4: "1234",
+      closedStatements: 3,
+      openStatements: 0,
+    });
+    assert.equal(closed.balanceArs, 0);
+    assert.equal(closed.balanceUsd, 0);
+    assert.equal(closed.settled, true);
+    assert.equal(closed.activeCard, false);
+    const mixed = readDebt({
+      forceSettled: false,
+      saldoArs: 120000,
+      saldoUsd: 30,
+      cardLast4: "1234",
+      closedStatements: 3,
+      openStatements: 1,
+    });
+    assert.equal(mixed.balanceArs, 120000);
+    assert.equal(mixed.settled, false);
+  });
+
   it("reads a closed card as zero and sin tarjeta activa", () => {
     const forced = readDebt({
       forceSettled: true,
