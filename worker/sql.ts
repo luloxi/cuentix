@@ -15,10 +15,11 @@
  *   COMPRA/VENTA of a single wallet code are only USD, USDC, USDT, USDB, ME
  *   (KO stays on the existing LIKE). COMPRA SUPER, COMPRA MERCADOLIBRE and
  *   TRANSFERENCIA A <persona> stay spends.
- *   "Transferencia inmediata" and a bare "TRANSFERENCIA" stay spends too.
- *   They are not an own-account pattern here. Income-side JS
- *   (`isOwnAccountTransferDescription`) still treats both as internal so
- *   they stay out of Ingresos. That split is intentional.
+ *   "Transferencia inmediata" and a bare "TRANSFERENCIA" stay spends unless
+ *   the id is in the dup set. That set is Fiwind echo ids union internal
+ *   transfers from `classifyTransferRows` (own-account id or an opposite
+ *   incoming twin). A generic transfer with no payee still counts. Income
+ *   uses the same data rule in `worker/income.ts`.
  *   A numeric-only description (digits and dots) is not accounting by
  *   itself. Unpaired Fiwind numeric rows stay counted. JS
  *   `isBankAccountingEntry` still treats every amount-only tipo as
@@ -50,8 +51,9 @@
  * exceptions in `isConsumosHiddenPayment`. Other bank-accounting lines
  * (paired numeric Fiwind echoes, pesificación, Retiro) stay out of the list.
  * Unpaired numeric descriptions stay visible, unlike the legacy JS filter.
- * "Transferencia inmediata" and bare "TRANSFERENCIA" are spends, so they
- * stay on the list.
+ * Internal-transfer ids are in the dup set (out of totals) and are also
+ * passed as `visibleIds`, so they stay on Consumos. A generic transfer
+ * stays on the list and counts.
  */
 
 /** Ids safe to inline. Anything else is dropped before it can reach SQL. */
@@ -127,8 +129,8 @@ const BANK_ACCOUNTING_BODY = `
   )`;
 
 /**
- * Phrase list, plus numeric Fiwind ids already paired in
- * `pairFiwindEchoes`. An empty dup set is the phrase list alone.
+ * Phrase list, plus ids already decided outside SQL (Fiwind echoes and
+ * internal transfers). An empty dup set is the phrase list alone.
  */
 export function bankAccountingSql(dupIds?: Iterable<string>): string {
   const dup = fiwindDupClause(dupIds);
@@ -264,11 +266,15 @@ export function reintegroPayeeSql(raw: string | undefined): string {
     .join("\n");
 }
 
-export function consumosVisibleSql(reintegroPayees?: string, dupIds?: Iterable<string>): string {
-  return CONSUMOS_VISIBLE_SQL.replace("/*REINTEGRO_PAYEES*/", reintegroPayeeSql(reintegroPayees)).replace(
-    "/*BANK_ACCOUNTING*/",
-    bankAccountingSql(dupIds),
-  );
+export function consumosVisibleSql(
+  reintegroPayees?: string,
+  dupIds?: Iterable<string>,
+  visibleIds?: Iterable<string>,
+): string {
+  const visible = fiwindDupClause(visibleIds);
+  return CONSUMOS_VISIBLE_SQL.replace("/*REINTEGRO_PAYEES*/", reintegroPayeeSql(reintegroPayees))
+    .replace("/*BANK_ACCOUNTING*/", bankAccountingSql(dupIds))
+    .replace("/*INTERNAL_TRANSFER_IDS*/", visible ? `\n    ${visible}` : "");
 }
 
 const CONSUMOS_VISIBLE_SQL = `
@@ -294,6 +300,7 @@ const CONSUMOS_VISIBLE_SQL = `
   AND IFNULL(t.source, '') NOT IN ('bbva_period', 'bbva_pdf')
   AND (
     ${INTERNAL_VISIBLE_SQL}
+    /*INTERNAL_TRANSFER_IDS*/
     OR NOT /*BANK_ACCOUNTING*/
   )
 `;

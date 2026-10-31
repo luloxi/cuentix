@@ -15,7 +15,7 @@ import { loadFx, monthEndBuy } from "./fx";
 import { activeHousehold, forceSharedOnly } from "./household";
 import { sumIncomeArs } from "./income";
 import { json, num, periodRange, shiftPeriod, todayAr } from "./http";
-import { loadFiwindEchoIds } from "./fiwind-dups";
+import { loadExcludedMovementIds } from "./transfer-class";
 import { ARS_EXPR, CLOSED_STATEMENT_SQL, expenseSql } from "./sql";
 
 const EVM = /^0x[a-fA-F0-9]{40}$/;
@@ -584,7 +584,7 @@ async function monthlyFlow(
     ? "t.ownership = 'shared'"
     : "(t.ownership = 'shared' OR t.paid_by_user_id = ?)";
   const visibilityBinds = sharedOnly ? [] : [userId];
-  const echoIds = await loadFiwindEchoIds(env.DB, userId);
+  const movements = await loadExcludedMovementIds(env.DB, userId, env.OWN_ACCOUNT_IDS);
   const [expenses, incomes] = await Promise.all([
     env.DB.prepare(
       `SELECT substr(t.date, 1, 7) AS month, SUM(${ARS_EXPR}) AS ars
@@ -592,14 +592,14 @@ async function monthlyFlow(
        WHERE t.household_id = ?
          AND t.date >= ?
          AND t.date < ?
-         AND ${expenseSql(echoIds)}
+         AND ${expenseSql(movements.excludedIds)}
          AND ${visibility}
        GROUP BY month`,
     )
       .bind(active.id, start.start, end.end, ...visibilityBinds)
       .all<{ month: string | null; ars: number | null }>(),
     env.DB.prepare(
-      `SELECT date, label, kind, frequency, amount_ars, amount_usd
+      `SELECT id, household_id, date, label, kind, frequency, amount_ars, amount_usd
        FROM incomes
        WHERE user_id = ? AND household_id = ?
        ORDER BY date DESC
@@ -607,6 +607,8 @@ async function monthlyFlow(
     )
       .bind(userId, active.id)
       .all<{
+        id: string;
+        household_id: string;
         date: string;
         label: string;
         kind: string | null;
@@ -623,7 +625,11 @@ async function monthlyFlow(
   const points: FlowPoint[] = [];
   for (let i = 0; i < FLOW_MONTHS; i += 1) {
     const month = shiftPeriod(startPeriod, i);
-    const incomeArs = sumIncomeArs(incomeRows, month, monthEndBuy(fx, month));
+    const incomeArs = sumIncomeArs(incomeRows, month, monthEndBuy(fx, month), {
+      ownIds: movements.ownIds,
+      userHouseholdIds: movements.userHouseholdIds,
+      outgoing: movements.incomeOutgoing,
+    });
     const expenseArs = expenseByMonth.get(month) ?? 0;
     points.push({
       month,

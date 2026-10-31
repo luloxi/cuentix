@@ -44,6 +44,8 @@ type Tx = {
   reintegroHogar?: boolean;
   /** Server flag: outbound-prefix payee only. Missing on old responses. */
   reintegroPayee?: boolean;
+  /** Generic transfer with no own account and no twin. Not stored. */
+  revisar?: boolean;
   paidByUserId: string | null; source: string;
   linkedTransactionId?: string | null;
   linkedToInvoiceIog?: boolean;
@@ -71,6 +73,21 @@ function memberLabel(m: Member) {
 function categoryLabel(name?: string | null) {
   if (!name) return "—";
   return name.toLowerCase() === "uncategorized" ? "Sin categoría" : name;
+}
+
+/** Status only. Not a control: no click, no pointer, no tap target. */
+function RevisarBadge({ size = "md" }: { size?: "sm" | "md" }) {
+  return (
+    <span
+      className={
+        size === "sm"
+          ? "shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-950 dark:bg-amber-900/50 dark:text-amber-100"
+          : "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-950 dark:bg-amber-900/50 dark:text-amber-100"
+      }
+    >
+      Revisar
+    </span>
+  );
 }
 
 /** Amber IOG pill — keep shrink-0 so truncate never eats it. */
@@ -291,6 +308,7 @@ export function TransactionsTable() {
         ownership: t.ownership === "shared" ? "shared" as const : "personal" as const,
         reintegroHogar: Boolean(t.reintegroHogar),
         reintegroPayee: Boolean(t.reintegroPayee),
+        revisar: Boolean(t.revisar),
       }));
       setRows(list);
       setTotalCount(data.total ?? list.length);
@@ -1188,6 +1206,7 @@ export function TransactionsTable() {
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <span className="truncate text-sm font-semibold">{r.descriptionNormalized}</span>
+                        {r.revisar ? <RevisarBadge size="sm" /> : null}
                         {isTicket && <span className="shrink-0 rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white dark:bg-violet-300 dark:text-violet-950">Ticket</span>}
                         {r.linkedToInvoiceIog && <IogBadge size="sm" />}
                       </div>
@@ -1349,6 +1368,7 @@ export function TransactionsTable() {
                         <td className="max-w-xs px-3 py-2">
                           <div className="flex min-w-0 items-center gap-1.5">
                             <span className="truncate font-medium">{r.descriptionNormalized}</span>
+                            {r.revisar ? <RevisarBadge /> : null}
                             {isTicket && <span className="shrink-0 rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-semibold uppercase text-white dark:bg-violet-300 dark:text-violet-950">Ticket</span>}
                             {r.linkedToInvoiceIog && <IogBadge />}
                           </div>
