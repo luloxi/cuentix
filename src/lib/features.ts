@@ -1,13 +1,12 @@
 /**
- * Deuda is rebuilt around open cuotas + the latest card snapshot.
- * Default on. Set NEXT_PUBLIC_DEUDA_ENABLED=0 to hide the Casita card
- * and /deuda. Nav never includes Deuda.
+ * No feature flags. Every section ships visible, even if incomplete.
+ * Deuda (Casita card + /deuda) is always on; the old
+ * NEXT_PUBLIC_DEUDA_ENABLED switch is gone and the env var is ignored.
+ * The bottom nav stays the canonical 5 items (see nav.ts); Deuda is reached
+ * from Inicio and the swipe path.
  */
-export function isDeudaEnabled(
-  value: string | undefined = process.env.NEXT_PUBLIC_DEUDA_ENABLED,
-): boolean {
-  if (value == null || value === "") return true;
-  return value === "1" || value === "true";
+export function isDeudaEnabled(_value?: string | undefined): boolean {
+  return true;
 }
 
-export const DEUDA_ENABLED = isDeudaEnabled();
+export const DEUDA_ENABLED = true;
