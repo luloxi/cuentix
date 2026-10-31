@@ -20,12 +20,17 @@
  * Direction uses the row's own currency (USD when |USD| >= 0.005 and the
  * counted ARS is 0 the way `ARS_EXPR` is 0 when both sides are nonzero,
  * otherwise ARS). Outgoing is a positive amount with `is_credit = 0`.
- * Incoming is `is_credit = 1` with a positive amount, or a negative amount
- * with `is_credit = 0`. A twin must be the opposite direction. The amount
- * compared is the transfer's own currency, same sign, strictly under
- * 0.01 ARS or 0.005 USD. +100 does not match -100: the signs disagree, so
- * both read as an outgoing magnitude in the transfer's own direction.
- * +100 outgoing does not match +100 outgoing.
+ * Incoming is `is_credit = 1` with either sign, or a negative amount with
+ * `is_credit = 0`. A twin must be the opposite direction. The incoming
+ * description must be a transfer or an own-account credit (marker or own
+ * id). An unrelated credit such as DEVOLUCION COMPRA does not cancel the
+ * transfer.
+ *
+ * For `is_credit = 1`, compare absolute values, so +100 outgoing matches
+ * -100 stored on a credit. A negative amount with `is_credit = 0` stays
+ * incoming, but the signs disagree with a positive outgoing, so +100 does
+ * not match -100 on that shape. +100 outgoing does not match +100 outgoing.
+ * Tolerance is strictly under 0.01 ARS or 0.005 USD.
  *
  * Pairing is 1:1. Closest day first, then transfer date, transfer id, twin
  * date, twin id. Each incoming row cancels at most one transfer. Rows in a
@@ -362,10 +367,11 @@ export function transferDirection(row: TransferClassRow): Direction | null {
 
 function directionOf(side: Side): Direction | null {
   const amount = amountIn(side, ownCurrency(side.ars, side.usd));
-  if (amount > 0 && !side.isCredit) return "outgoing";
-  if (side.isCredit && amount > 0) return "incoming";
-  if (amount < 0 && !side.isCredit) return "incoming";
-  return null;
+  if (amount === 0) return null;
+  // A credit column is incoming even when the stored amount is negative.
+  if (side.isCredit) return "incoming";
+  if (amount > 0) return "outgoing";
+  return "incoming";
 }
 
 function toSide(row: TransferClassRow): Side | null {
@@ -399,15 +405,30 @@ function expenseTransfer(side: Side, homes: ReadonlySet<string>): boolean {
   return isTransferDescription(side.description);
 }
 
+function incomingTwinLeg(side: Side, homes: ReadonlySet<string>, ownIds: ReadonlySet<string>): boolean {
+  if (!homes.has(side.householdId)) return false;
+  if (directionOf(side) !== "incoming") return false;
+  return transferOrOwnAccount(side.description, ownIds);
+}
+
+/** Signed amount, or the absolute value when the row is a credit. */
+function pairAmount(side: Side, currency: Currency): number {
+  const raw = amountIn(side, currency);
+  return side.isCredit ? Math.abs(raw) : raw;
+}
+
 /**
  * Ids of outgoing transfers cancelled by an incoming twin. Own-id matches are
  * not included; pass them in `skipIds` so they do not consume the twin.
+ * The incoming leg must be a transfer or an own-account credit.
  */
 export function pairInternalTransferIds(
   rows: readonly TransferClassRow[],
   userHouseholdIds: ReadonlySet<string>,
   skipIds?: ReadonlySet<string>,
+  ownIds?: ReadonlySet<string>,
 ): Set<string> {
+  const ids = ownIds ?? new Set<string>();
   const sides: Side[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
@@ -431,10 +452,9 @@ export function pairInternalTransferIds(
     else buckets.set(key, [row]);
   };
   for (const row of sides) {
-    if (directionOf(row) !== "incoming") continue;
-    if (!userHouseholdIds.has(row.householdId)) continue;
-    pushBucket("ARS", row.ars, row);
-    pushBucket("USD", row.usd, row);
+    if (!incomingTwinLeg(row, userHouseholdIds, ids)) continue;
+    pushBucket("ARS", pairAmount(row, "ARS"), row);
+    pushBucket("USD", pairAmount(row, "USD"), row);
   }
 
   const pairs: Pair[] = [];
@@ -450,11 +470,12 @@ export function pairInternalTransferIds(
       for (const twin of list) {
         if (twin.id === transfer.id) continue;
         if (!otherAccount(transfer, twin, userHouseholdIds)) continue;
-        const twinAmount = amountIn(twin, currency);
-        // Same sign. +100 does not match -100.
-        if (amount * twinAmount <= 0) continue;
-        if (!withinTolerance(amount, twinAmount, tol)) continue;
-        if (directionOf(twin) !== "incoming") continue;
+        if (!incomingTwinLeg(twin, userHouseholdIds, ids)) continue;
+        const twinAmount = pairAmount(twin, currency);
+        // Non-credit incoming keeps its sign, so +100 does not match -100.
+        // A credit compares absolute values, including a negative stored amount.
+        if (!twin.isCredit && amount * twinAmount <= 0) continue;
+        if (!withinTolerance(Math.abs(amount), Math.abs(twinAmount), tol)) continue;
         const distance = Math.abs(transfer.day - twin.day);
         if (distance > 1) continue;
         pairs.push({
@@ -505,7 +526,7 @@ export function classifyTransferRows(
     seen.add(row.id);
     if (descriptionHasOwnId(side.description, ownIds)) internalIds.add(side.id);
   }
-  for (const id of pairInternalTransferIds(rows, userHouseholdIds, internalIds)) {
+  for (const id of pairInternalTransferIds(rows, userHouseholdIds, internalIds, ownIds)) {
     internalIds.add(id);
   }
   seen.clear();
