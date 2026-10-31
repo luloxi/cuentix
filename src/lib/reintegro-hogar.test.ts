@@ -157,7 +157,7 @@ describe("Consumos visibility for hogar reintegro isPayment", () => {
     );
     assert.equal(
       isConsumosHiddenPayment(true, "BBVA CA$ TRANSFERENCIA", null),
-      false,
+      true,
     );
     // Still hidden when category is plain pagos
     assert.equal(

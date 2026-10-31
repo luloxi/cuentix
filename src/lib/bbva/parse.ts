@@ -651,9 +651,11 @@ export function parseStatementWorkbook(
       categoryHint = categoryHintForFiwindKind(kind);
     }
 
-    // Rainman: self-transfer / own FX → Transferencia interna (never Ingresos).
-    // Assign, don't fill: Fiwind kind "transfer" hints Conversiones
-    // (TRANSFERENCIA ARS/USDC), and “A/De una cuenta tuya” must still win.
+    // Explicit own-account / own FX → Transferencia interna (never Ingresos).
+    // A bare TRANSFERENCIA or TRANSFERENCIA INMEDIATA stays is_payment 0 so
+    // the worker can classify the new row. Assign, don't fill: Fiwind kind
+    // "transfer" hints Conversiones (TRANSFERENCIA ARS/USDC), and
+    // “A/De una cuenta tuya” must still win.
     if (isInternalTransferDescription(descriptionNormalized)) {
       payment = true;
       credit = false;
