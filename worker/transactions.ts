@@ -25,7 +25,7 @@ import {
   type OutboxDraft,
 } from "./serpix-sync";
 import { reintegroFlags } from "./reintegro-flags";
-import { loadFiwindEchoIds } from "./fiwind-dups";
+import { loadExcludedMovementIds } from "./transfer-class";
 import { consumosVisibleSql } from "./sql";
 
 const MAX_LIMIT = 100;
@@ -74,13 +74,14 @@ async function listTransactions(req: Request, env: Env, user: SessionUser): Prom
     forceSharedOnly(active.name);
   const limit = clampInt(url.searchParams.get("limit"), 10, 1, MAX_LIMIT);
   const offset = clampInt(url.searchParams.get("offset"), 0, 0, 100_000);
-  const echoIds = await loadFiwindEchoIds(env.DB, user.id);
+  const movements = await loadExcludedMovementIds(env.DB, user.id, env.OWN_ACCOUNT_IDS);
   const { where, binds } = buildWhere(url, {
     householdId: active.id,
     userId: user.id,
     sharedOnly,
     reintegroPayees: env.REINTEGRO_PAYEES,
-    echoIds,
+    excludedIds: movements.excludedIds,
+    internalIds: movements.internalIds,
   });
 
   const [page, countRow, periods, categories, members, iogRow] = await Promise.all([
@@ -163,6 +164,7 @@ async function listTransactions(req: Request, env: Env, user: SessionUser): Prom
       canEdit: row.ownership === "shared" || row.paid_by_user_id === user.id,
       isBusiness: Boolean(row.is_business),
       syncStatus: syncStatusFromOutbox(row),
+      revisar: movements.revisarIds.has(row.id),
       ...reintegroFlags(row.description_normalized, env.REINTEGRO_PAYEES),
     };
   });
@@ -189,7 +191,8 @@ function buildWhere(
     userId: string;
     sharedOnly: boolean;
     reintegroPayees?: string;
-    echoIds?: readonly string[];
+    excludedIds?: readonly string[];
+    internalIds?: readonly string[];
   },
 ): { where: string; binds: unknown[] } {
   const binds: unknown[] = [];
@@ -199,7 +202,7 @@ function buildWhere(
   };
   const parts = [
     `t.household_id = ${ph(scope.householdId)}`,
-    consumosVisibleSql(scope.reintegroPayees, scope.echoIds),
+    consumosVisibleSql(scope.reintegroPayees, scope.excludedIds, scope.internalIds),
   ];
   if (scope.sharedOnly) parts.push("t.ownership = 'shared'");
   else parts.push(`(t.ownership = 'shared' OR t.paid_by_user_id = ${ph(scope.userId)})`);
@@ -525,6 +528,7 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
     await env.DB.batch(statements);
     receipt = { id: receiptId };
   }
+  const movements = await loadExcludedMovementIds(env.DB, user.id, env.OWN_ACCOUNT_IDS);
   return json({
     transaction: {
       id: txId,
@@ -534,6 +538,7 @@ async function createTransaction(req: Request, env: Env, user: SessionUser): Pro
       amountUsd: amountUsdText != null ? Number(amountUsdText) : null,
       ownership,
       categoryId,
+      revisar: movements.revisarIds.has(txId),
       ...reintegroFlags(description, env.REINTEGRO_PAYEES),
     },
     receipt,

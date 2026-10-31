@@ -3,7 +3,7 @@ import { loadFx, monthEndBuy } from "./fx";
 import { activeHousehold, forceSharedOnly, type HouseholdRow } from "./household";
 import { sumIncomeArs } from "./income";
 import { debtFigure } from "../src/lib/stats/debt";
-import { loadFiwindEchoIds } from "./fiwind-dups";
+import { loadExcludedMovementIds } from "./transfer-class";
 import { ARS_EXPR, CLOSED_STATEMENT_SQL, USD_EXPR, expenseSql } from "./sql";
 import { currentPeriodAr, json, num, periodRange, shiftPeriod } from "./http";
 import type { SessionUser } from "./auth";
@@ -31,13 +31,14 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
 
   const sharedOnly = forceSharedOnly(active.name);
   const fxPromise = loadFx();
-  // One echo lookup for this user. A D1 failure counts every row.
-  const echoIds = await loadFiwindEchoIds(env.DB, user.id);
+  // Echo ids plus internal transfers. A D1 failure counts the rows it could not classify.
+  const movements = await loadExcludedMovementIds(env.DB, user.id, env.OWN_ACCOUNT_IDS);
+  const excludedIds = movements.excludedIds;
   const [own, shared, categories, paidSlugs, savings, debt, incomes, fx] = await Promise.all([
-    totals(env, active, user.id, sharedOnly, current.start, previous.start, current.end, echoIds),
-    totals(env, active, user.id, true, current.start, previous.start, current.end, echoIds),
-    categoryBreakdown(env, active, user.id, sharedOnly, current.start, current.end, echoIds),
-    paidServiceSlugs(env, active.id, current.start, current.end, echoIds),
+    totals(env, active, user.id, sharedOnly, current.start, previous.start, current.end, excludedIds),
+    totals(env, active, user.id, true, current.start, previous.start, current.end, excludedIds),
+    categoryBreakdown(env, active, user.id, sharedOnly, current.start, current.end, excludedIds),
+    paidServiceSlugs(env, active.id, current.start, current.end, excludedIds),
     savingsTotals(env, user.id),
     debtSnapshot(env, user.id),
     incomeRows(env, user.id),
@@ -76,7 +77,11 @@ export async function handleDashboard(req: Request, env: Env, user: SessionUser)
   const blue = fx.blue;
   const savingsFxUsd = savings.usd + savings.usdc;
   const savingsNetArs = savings.ars + (blue != null && blue > 0 ? savingsFxUsd * blue : 0);
-  const incomeArs = sumIncomeArs(incomes, period, rateNow);
+  const incomeArs = sumIncomeArs(incomes, period, rateNow, {
+    ownIds: movements.ownIds,
+    userHouseholdIds: movements.userHouseholdIds,
+    outgoing: movements.incomeOutgoing,
+  });
   const firstName = (user.name || user.email || "").split(/\s+/)[0] || "vos";
 
   return json({
@@ -268,11 +273,13 @@ async function debtSnapshot(env: Env, userId: string) {
 
 async function incomeRows(env: Env, userId: string) {
   const res = await env.DB.prepare(
-    `SELECT date, label, kind, frequency, amount_ars, amount_usd
+    `SELECT id, household_id, date, label, kind, frequency, amount_ars, amount_usd
      FROM incomes WHERE user_id = ? ORDER BY date DESC LIMIT 400`,
   )
     .bind(userId)
     .all<{
+      id: string;
+      household_id: string;
       date: string;
       label: string;
       kind: string | null;
