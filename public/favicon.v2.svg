@@ -9,5 +9,5 @@
     </linearGradient>
   </defs>
   <path d="M 307 156 A 124 124 0 1 0 307 356" fill="none" stroke="url(#brand)" stroke-width="68" stroke-linecap="round"/>
-  <path d="M 320 240 L 362 292 L 420 200" fill="none" stroke="#F6CD35" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 320 240 L 362 292 L 420 200" fill="none" stroke="#E2781B" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

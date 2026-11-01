@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   applicationName: "Cuentix",
   description:
     "Importá gastos de tarjeta, fotografiá tickets y compartí el balance con tu grupo.",
-  manifest: "/manifest.webmanifest",
+  manifest: "/manifest.v2.webmanifest",
   openGraph: {
     title: "Cuentix",
     description:
@@ -28,14 +28,14 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/icons/favicon.v2.ico", sizes: "any" },
-      { url: "/favicon-tab.v2.svg", type: "image/svg+xml" },
-      { url: "/icons/favicon-32.v2.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/favicon.v3.ico", sizes: "any" },
+      { url: "/favicon-tab.v3.svg", type: "image/svg+xml" },
+      { url: "/icons/favicon-32.v3.png", sizes: "32x32", type: "image/png" },
     ],
     apple: [
-      { url: "/icons/apple-touch-icon-180.png", sizes: "180x180", type: "image/png" },
+      { url: "/icons/apple-touch-icon-180.v2.png", sizes: "180x180", type: "image/png" },
     ],
-    shortcut: ["/icons/favicon.v2.ico"],
+    shortcut: ["/icons/favicon.v3.ico"],
   },
   appleWebApp: {
     capable: true,
@@ -81,11 +81,11 @@ export default function RootLayout({
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
-        <link rel="icon" href="/icons/favicon.v2.ico" sizes="any" />
-        <link rel="icon" href="/favicon-tab.v2.svg" type="image/svg+xml" />
-        <link rel="icon" href="/icons/favicon-32.v2.png" type="image/png" sizes="32x32" />
-        <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" sizes="180x180" />
-        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" href="/icons/favicon.v3.ico" sizes="any" />
+        <link rel="icon" href="/favicon-tab.v3.svg" type="image/svg+xml" />
+        <link rel="icon" href="/icons/favicon-32.v3.png" type="image/png" sizes="32x32" />
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.v2.png" sizes="180x180" />
+        <link rel="manifest" href="/manifest.v2.webmanifest" />
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>{children}</Providers>

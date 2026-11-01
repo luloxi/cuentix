@@ -1,5 +1,5 @@
 /**
- * Rasterize public/brand/cuentix-icon.svg into the PWA icon set.
+ * Rasterize public/brand/cuentix-icon.v2.svg into the PWA icon set.
  *
  *   node scripts/make-cuentix-icons.mjs
  *
@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const masterPath = path.join(root, "public/brand/cuentix-icon.svg");
+const masterPath = path.join(root, "public/brand/cuentix-icon.v2.svg");
 const iconsDir = path.join(root, "public/icons");
 const SIZE = 512;
 const SAFE_DIAMETER = 0.66 * SIZE;
@@ -120,52 +120,17 @@ async function maskable(svg) {
   return png;
 }
 
-function icoFromPngs(images) {
-  const count = images.length;
-  const header = Buffer.alloc(6 + count * 16);
-  header.writeUInt16LE(0, 0);
-  header.writeUInt16LE(1, 2);
-  header.writeUInt16LE(count, 4);
-  let offset = header.length;
-  const parts = [header];
-  images.forEach((image, index) => {
-    const entry = 6 + index * 16;
-    header[entry] = image.size >= 256 ? 0 : image.size;
-    header[entry + 1] = image.size >= 256 ? 0 : image.size;
-    header.writeUInt16LE(1, entry + 4);
-    header.writeUInt16LE(32, entry + 6);
-    header.writeUInt32LE(image.buffer.length, entry + 8);
-    header.writeUInt32LE(offset, entry + 12);
-    offset += image.buffer.length;
-    parts.push(image.buffer);
-  });
-  return Buffer.concat(parts);
-}
-
 const svg = await readFile(masterPath);
 await mkdir(iconsDir, { recursive: true });
 
 const icon512 = await raster(svg, 512);
 const icon192 = await raster(svg, 192);
 const apple = await raster(svg, 180);
-const fav32 = await raster(svg, 32);
-const fav16 = await raster(svg, 16, { alpha: true });
-const fav32Ico = await raster(svg, 32, { alpha: true });
-const fav48 = await raster(svg, 48, { alpha: true });
 const mask = await maskable(svg);
-const ico = icoFromPngs([
-  { size: 16, buffer: fav16 },
-  { size: 32, buffer: fav32Ico },
-  { size: 48, buffer: fav48 },
-]);
+await writeFile(path.join(iconsDir, "icon-512.v2.png"), icon512);
+await writeFile(path.join(iconsDir, "icon-192.v2.png"), icon192);
+await writeFile(path.join(iconsDir, "icon-maskable-512.v2.png"), mask);
+await writeFile(path.join(iconsDir, "apple-touch-icon-180.v2.png"), apple);
+await writeFile(path.join(root, "public/favicon.v2.svg"), svg);
 
-await writeFile(path.join(iconsDir, "icon-512.png"), icon512);
-await writeFile(path.join(iconsDir, "icon-192.png"), icon192);
-await writeFile(path.join(iconsDir, "icon-maskable-512.png"), mask);
-await writeFile(path.join(iconsDir, "apple-touch-icon-180.png"), apple);
-await writeFile(path.join(iconsDir, "favicon-32.png"), fav32);
-await writeFile(path.join(iconsDir, "favicon.ico"), ico);
-await writeFile(path.join(root, "public/favicon.svg"), svg);
-await writeFile(path.join(root, "src/app/favicon.ico"), ico);
-
-console.log("wrote public/icons/* , public/favicon.svg , src/app/favicon.ico");
+console.log("wrote public/icons/*.v2.png , public/favicon.v2.svg (la pestaña usa scripts/make-tab-favicon.py: recortada, fondo transparente)");

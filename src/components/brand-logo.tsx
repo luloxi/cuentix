@@ -1,8 +1,8 @@
 import { cn } from "@/lib/utils";
 
 /**
- * App mark. Same artwork as public/brand/cuentix-icon.svg
- * (black field, yellow C, gradient x).
+ * App mark. Same artwork as public/brand/cuentix-icon.v2.svg
+ * (black field, gradient C, orange x).
  */
 export function BrandLogo({
   className,
@@ -14,7 +14,7 @@ export function BrandLogo({
   return (
     // eslint-disable-next-line @next/next/no-img-element -- brand SVG, same file as the PWA icon
     <img
-      src="/brand/cuentix-icon.svg"
+      src="/brand/cuentix-icon.v2.svg"
       width={size}
       height={size}
       alt=""
