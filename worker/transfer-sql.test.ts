@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { FIWIND_ECHO_CANDIDATE_SQL } from "./fiwind-dups";
 import { annotateIncomeRows, sumIncomeArs } from "./income";
 import { ARS_EXPR, consumosVisibleSql, expenseSql } from "./sql";
-import { INCOME_TWIN_SQL, TRANSFER_CANDIDATE_SQL, loadExcludedMovementIds } from "./transfer-class";
+import {
+  INCOME_TWIN_SQL,
+  TRANSFER_CANDIDATE_SQL,
+  clearExcludedMovementCache,
+  loadExcludedMovementIds,
+} from "./transfer-class";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CUIT = "1".repeat(11);
@@ -217,6 +222,10 @@ describe("TRANSFER_CANDIDATE_SQL", () => {
 });
 
 describe("transfer exclusion in the expense fragment", () => {
+  beforeEach(() => {
+    clearExcludedMovementCache();
+  });
+
   it("keeps internal transfers out of totals and on Consumos, and counts third parties and revisar", async () => {
     const db = openDb();
     seedPeople(db);
@@ -726,6 +735,67 @@ describe("transfer exclusion in the expense fragment", () => {
       assert.equal(incomeLog?.includes("80"), false);
       assert.equal(incomeLog?.includes("income down"), true);
       assert.equal(lines.some((line) => line.includes("transfer class load failed")), false);
+    } finally {
+      console.error = original;
+    }
+  });
+
+  it("does not read D1 again for the same user within 60 seconds", async () => {
+    const db = openDb();
+    seedPeople(db);
+    let reads = 0;
+    const real = wrap(db);
+    const counting = {
+      prepare(sql: string) {
+        const stmt = real.prepare(sql);
+        return {
+          bind(...values: unknown[]) {
+            const bound = stmt.bind(...values);
+            return {
+              async all<T>() {
+                reads += 1;
+                return bound.all<T>();
+              },
+            };
+          },
+        };
+      },
+    };
+    const first = await loadExcludedMovementIds(counting, "user-cache", null);
+    const afterFirst = reads;
+    assert.equal(afterFirst > 0, true);
+    const second = await loadExcludedMovementIds(counting, "user-cache", null);
+    assert.equal(reads, afterFirst);
+    assert.deepEqual(second.excludedIds, first.excludedIds);
+    assert.deepEqual(second.internalIds, first.internalIds);
+
+    const lines: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map((arg) => String(arg)).join(" "));
+    };
+    try {
+      let failReads = 0;
+      const failing = {
+        prepare(sql: string) {
+          return {
+            bind() {
+              return {
+                async all() {
+                  failReads += 1;
+                  if (sql === TRANSFER_CANDIDATE_SQL) throw new Error("d1 down");
+                  return { results: [] };
+                },
+              };
+            },
+          };
+        },
+      };
+      await loadExcludedMovementIds(failing, "user-cache-fail", CUIT);
+      const afterFail = failReads;
+      await loadExcludedMovementIds(failing, "user-cache-fail", CUIT);
+      assert.equal(failReads > afterFail, true);
+      assert.equal(lines.some((line) => line.includes("transfer class load failed")), true);
     } finally {
       console.error = original;
     }

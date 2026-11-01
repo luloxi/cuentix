@@ -967,15 +967,19 @@ export type MovementExclusion = {
   incomeOutgoing: TransferClassRow[];
 };
 
-function emptyTransfer(raw: string | null | undefined): Omit<MovementExclusion, "excludedIds"> & {
-  internalIds: string[];
-} {
+type TransferSnapshot = Omit<MovementExclusion, "excludedIds"> & {
+  /** Set only when the transfer statement threw and this is the empty fallback. */
+  transferLoadFailed?: boolean;
+};
+
+function emptyTransfer(raw: string | null | undefined): TransferSnapshot {
   return {
     internalIds: [],
     revisarIds: new Set(),
     ownIds: parseOwnAccountIds(raw),
     userHouseholdIds: new Set(),
     incomeOutgoing: [],
+    transferLoadFailed: true,
   };
 }
 
@@ -1010,7 +1014,7 @@ export async function loadTransferSnapshot(
   db: TransferClassDb,
   userId: string,
   ownAccountIdsRaw: string | null | undefined,
-): Promise<Omit<MovementExclusion, "excludedIds">> {
+): Promise<TransferSnapshot> {
   try {
     const [res, incomeRows] = await Promise.all([
       db.prepare(TRANSFER_CANDIDATE_SQL).bind(userId).all<TransferCandidateRow>(),
@@ -1057,24 +1061,48 @@ export async function loadTransferSnapshot(
   }
 }
 
+const EXCLUDED_MOVEMENT_TTL_MS = 60_000;
+
+const excludedMovementCache = new Map<string, { at: number; value: MovementExclusion }>();
+
+/** Drops cached exclusion loads. The 60s TTL covers writes that do not call this. */
+export function clearExcludedMovementCache(): void {
+  excludedMovementCache.clear();
+}
+
+function excludedMovementCacheKey(userId: string, ownAccountIdsRaw: string | null | undefined): string {
+  return `${userId}|${ownAccountIdsRaw ?? ""}`;
+}
+
 /**
  * Fiwind echo ids union internal-transfer ids. One Fiwind statement plus the
  * transfer statement and the income-twin statement, in parallel. A Fiwind
  * or income-twin failure leaves that half empty, so the rows it could not
  * classify still count. A transfer-statement failure returns no internal ids.
+ *
+ * A successful load is reused for 60 seconds per isolate, keyed by user and
+ * `OWN_ACCOUNT_IDS`. The empty fallback from a failed transfer statement is
+ * not cached.
  */
 export async function loadExcludedMovementIds(
   db: FiwindEchoDb & TransferClassDb,
   userId: string,
   ownAccountIdsRaw: string | null | undefined,
 ): Promise<MovementExclusion> {
+  const key = excludedMovementCacheKey(userId, ownAccountIdsRaw);
+  const cached = excludedMovementCache.get(key);
+  if (cached) {
+    if (Date.now() - cached.at < EXCLUDED_MOVEMENT_TTL_MS) return cached.value;
+    excludedMovementCache.delete(key);
+  }
+
   const [echoIds, transfer] = await Promise.all([
     loadFiwindEchoIds(db, userId),
     loadTransferSnapshot(db, userId, ownAccountIdsRaw),
   ]);
   const excluded = new Set<string>(echoIds);
   for (const id of transfer.internalIds) excluded.add(id);
-  return {
+  const value: MovementExclusion = {
     excludedIds: [...excluded].sort(),
     internalIds: transfer.internalIds,
     revisarIds: transfer.revisarIds,
@@ -1082,4 +1110,8 @@ export async function loadExcludedMovementIds(
     userHouseholdIds: transfer.userHouseholdIds,
     incomeOutgoing: transfer.incomeOutgoing,
   };
+  if (!transfer.transferLoadFailed) {
+    excludedMovementCache.set(key, { at: Date.now(), value });
+  }
+  return value;
 }

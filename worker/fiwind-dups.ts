@@ -281,8 +281,11 @@ function amountCouldMatchSql(numeric: string, named: string): string {
 
 /**
  * One statement, one bound (`user_id`). Membership comes from
- * `household_members`. Transaction lookups are equality or a ±2 day range
- * on `tx_household_date_idx (household_id, date)`. There is no date-only
+ * `household_members`. Fiwind numerics use `bank = 'Fiwind'` on
+ * `tx_household_bank_idx (household_id, bank)`. `IFNULL(bank, '')` matches
+ * the same rows (NULL is never `'Fiwind'`) but cannot use that index.
+ * Named rows use a ±2 day range or an equality on
+ * `tx_household_date_idx (household_id, date)`. There is no date-only
  * index, so the statement never filters transactions by date alone.
  *
  * `kind = 'hh'` is one row per household of the user. `kind = 'tx'` is a
@@ -303,7 +306,7 @@ numerics AS (
     t.amount_usd
   FROM user_households uh
   INNER JOIN transactions t ON t.household_id = uh.household_id
-  WHERE IFNULL(t.bank, '') = 'Fiwind'
+  WHERE t.bank = 'Fiwind'
     AND ${numericDescriptionSql("t")}
 )
 SELECT

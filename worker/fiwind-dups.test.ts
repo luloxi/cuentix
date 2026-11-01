@@ -391,7 +391,7 @@ describe("loadFiwindEchoIds", () => {
     const detail = plan.map((line) => line.detail).join("\n");
     // Fiwind numerics are an equality on (household_id, bank). Named rows
     // use the date window on tx_household_date_idx. Neither scans the table.
-    assert.match(detail, /SEARCH t USING INDEX tx_household_bank_idx \(household_id=\?\)/);
+    assert.match(detail, /SEARCH t USING INDEX tx_household_bank_idx \(household_id=\? AND bank=\?\)/);
     assert.match(detail, /SEARCH m USING INDEX tx_household_date_idx \(household_id=\? AND date>\? AND date<\?\)/);
     assert.match(detail, /SEARCH m USING INDEX tx_household_date_idx \(household_id=\? AND date=\?\)/);
     assert.match(detail, /hm_user_idx \(user_id=\?\)/);

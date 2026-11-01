@@ -17,6 +17,7 @@ function openMigrated(): DatabaseSync {
     "0004_card_closed.sql",
     "0005_patrimonio_snapshots.sql",
     "0006_patrimonio_user_date.sql",
+    "0007_perf_indexes.sql",
   ]) {
     db.exec(readFileSync(join(root, "migrations", file), "utf8"));
   }
@@ -186,5 +187,17 @@ describe("D1 migrations on node:sqlite", () => {
         )
         .run(),
     );
+  });
+
+  it("indexes merchant_rules by category and household", () => {
+    const db = openMigrated();
+    const indexes = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'merchant_rules'",
+      )
+      .all() as Array<{ name: string }>;
+    const names = new Set(indexes.map((row) => row.name));
+    assert.ok(names.has("merchant_rules_category_idx"));
+    assert.ok(names.has("merchant_rules_household_idx"));
   });
 });

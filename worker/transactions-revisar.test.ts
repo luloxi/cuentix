@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { Env } from "./env";
 import { handleTransactions } from "./transactions";
+import { clearExcludedMovementCache } from "./transfer-class";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const user = { id: "u1", email: "a@b.co", name: "Ana", image: null };
@@ -126,6 +127,10 @@ function insertTx(
 }
 
 describe("GET /api/transactions revisar", () => {
+  beforeEach(() => {
+    clearExcludedMovementCache();
+  });
+
   it("flags a generic transfer, counts it, and leaves spends, named transfers, and internal twins unflagged", async () => {
     const db = openDb();
     insertTx(db, {
