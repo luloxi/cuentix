@@ -28,15 +28,14 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
-      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/icons/favicon.v2.ico", sizes: "any" },
+      { url: "/favicon-tab.v2.svg", type: "image/svg+xml" },
+      { url: "/icons/favicon-32.v2.png", sizes: "32x32", type: "image/png" },
     ],
     apple: [
       { url: "/icons/apple-touch-icon-180.png", sizes: "180x180", type: "image/png" },
     ],
-    shortcut: ["/favicon.svg"],
+    shortcut: ["/icons/favicon.v2.ico"],
   },
   appleWebApp: {
     capable: true,
@@ -82,9 +81,9 @@ export default function RootLayout({
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
-        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-        <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32" />
-        <link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
+        <link rel="icon" href="/icons/favicon.v2.ico" sizes="any" />
+        <link rel="icon" href="/favicon-tab.v2.svg" type="image/svg+xml" />
+        <link rel="icon" href="/icons/favicon-32.v2.png" type="image/png" sizes="32x32" />
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" sizes="180x180" />
         <link rel="manifest" href="/manifest.webmanifest" />
       </head>
