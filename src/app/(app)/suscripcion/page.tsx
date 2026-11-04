@@ -1,5 +1,11 @@
-import { SoonPage } from "@/components/soon-page";
+import { Suspense } from "react";
+import { SuscripcionView } from "@/components/suscripcion-view";
+import { LoadingBlock } from "@/components/ui";
 
 export default function Page() {
-  return <SoonPage title="Suscripción" />;
+  return (
+    <Suspense fallback={<LoadingBlock label="Cargando suscripción…" />}>
+      <SuscripcionView />
+    </Suspense>
+  );
 }

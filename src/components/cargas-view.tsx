@@ -74,6 +74,18 @@ export function CargasView() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    function onSwitch() {
+      void load();
+    }
+    window.addEventListener("lc:household-switched", onSwitch);
+    window.addEventListener("lc:card-imported", onSwitch);
+    return () => {
+      window.removeEventListener("lc:household-switched", onSwitch);
+      window.removeEventListener("lc:card-imported", onSwitch);
+    };
+  }, [load]);
+
   const filtered = useMemo(() => {
     if (filter === "all") return items;
     return items.filter((i) => i.kind === filter);
@@ -136,7 +148,7 @@ export function CargasView() {
             type="button"
             onClick={() => setFilter(f.id)}
             className={cn(
-              "rounded-full px-3 py-1.5 text-xs font-medium transition",
+              "min-h-10 rounded-full px-3 py-2 text-xs font-medium transition",
               filter === f.id
                 ? "bg-[var(--brand-soft)] text-[var(--brand-fg)]"
                 : "bg-[var(--surface-muted)] text-[var(--muted-fg)] hover:text-[var(--foreground)]",

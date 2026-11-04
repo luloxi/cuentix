@@ -1,5 +1,11 @@
-import { SoonPage } from "@/components/soon-page";
+import { Suspense } from "react";
+import { CompartidoView } from "@/components/compartido-view";
+import { HogarSkeleton } from "@/components/ui";
 
 export default function Page() {
-  return <SoonPage title="Hogar" />;
+  return (
+    <Suspense fallback={<HogarSkeleton />}>
+      <CompartidoView />
+    </Suspense>
+  );
 }

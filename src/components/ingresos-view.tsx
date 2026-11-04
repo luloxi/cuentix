@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { LineChart, Trash2 } from "lucide-react";
 import { TotalSpendChart } from "@/components/spend-charts";
 import {
@@ -21,7 +22,11 @@ import {
   cn,
   currentPeriodAr,
 } from "@/lib/utils";
-import { formatPeriodLabel } from "@/lib/period-label";
+import {
+  formatPeriodLabel,
+  periodSelectOptions,
+  selectedPeriod,
+} from "@/lib/period-label";
 import {
   INCOME_FREQUENCIES,
   frequencyLabel,
@@ -44,6 +49,15 @@ type IncomeRow = {
 type FormMode = "recurring" | "variable";
 
 export function IngresosView() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const fallback = currentPeriodAr();
+  const period = selectedPeriod(searchParams.get("period"), fallback);
+  const periods = useMemo(
+    () => periodSelectOptions(period, fallback, 18),
+    [period, fallback],
+  );
+
   const [rows, setRows] = useState<IncomeRow[]>([]);
   const [periodEntries, setPeriodEntries] = useState<PeriodIncomeEntry[]>([]);
   const [monthlyEvolution, setMonthlyEvolution] = useState<
@@ -60,8 +74,6 @@ export function IngresosView() {
   const [amountArs, setAmountArs] = useState("");
   const [amountUsd, setAmountUsd] = useState("");
   const [frequency, setFrequency] = useState<IncomeFrequency>("mensual");
-
-  const period = currentPeriodAr();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,6 +98,22 @@ export function IngresosView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    function onSwitch() {
+      void load();
+    }
+    window.addEventListener("lc:household-switched", onSwitch);
+    return () => window.removeEventListener("lc:household-switched", onSwitch);
+  }, [load]);
+
+  function onPeriodChange(next: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === fallback) params.delete("period");
+    else params.set("period", next);
+    const qs = params.toString();
+    router.replace(qs ? `/ingresos?${qs}` : "/ingresos", { scroll: false });
+  }
 
   const recurringRows = useMemo(
     () => rows.filter((r) => r.kind === "recurring"),
@@ -157,6 +185,20 @@ export function IngresosView() {
       <PageHeader
         title="Ingresos"
         description={`Sueldos y cobros · ${formatPeriodLabel(period)}. La neta del inicio es esto menos los gastos.`}
+        actions={
+          <select
+            value={period}
+            onChange={(e) => onPeriodChange(e.target.value)}
+            className="lc-input min-h-10 min-w-[10rem] capitalize"
+            aria-label="Período"
+          >
+            {periods.map((p) => (
+              <option key={p} value={p}>
+                {formatPeriodLabel(p)}
+              </option>
+            ))}
+          </select>
+        }
       />
 
       {error && (
@@ -226,7 +268,7 @@ export function IngresosView() {
                   type="button"
                   onClick={() => setFrequency(f.id)}
                   className={cn(
-                    "rounded-xl border px-2 py-2 text-center text-xs font-medium transition",
+                    "min-h-10 rounded-xl border px-2 py-2 text-center text-xs font-medium transition",
                     frequency === f.id
                       ? "border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand-fg)]"
                       : "border-[var(--border)] text-[var(--muted-fg)] hover:bg-[var(--surface-muted)]",
@@ -328,7 +370,7 @@ export function IngresosView() {
                     </div>
                     <button
                       type="button"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-red-600"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-red-600"
                       aria-label="Borrar sueldo recurrente"
                       onClick={() => void remove(r.id)}
                     >
@@ -411,7 +453,7 @@ export function IngresosView() {
                 {!r.expected && (
                   <button
                     type="button"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-red-600"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-red-600"
                     aria-label="Borrar"
                     onClick={() => void remove(r.sourceId)}
                   >

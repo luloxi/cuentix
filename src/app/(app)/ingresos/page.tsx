@@ -1,5 +1,11 @@
-import { SoonPage } from "@/components/soon-page";
+import { Suspense } from "react";
+import { IngresosView } from "@/components/ingresos-view";
+import { ListSkeleton } from "@/components/ui";
 
 export default function Page() {
-  return <SoonPage title="Ingresos" />;
+  return (
+    <Suspense fallback={<ListSkeleton label="Cargando ingresos…" rows={4} />}>
+      <IngresosView />
+    </Suspense>
+  );
 }

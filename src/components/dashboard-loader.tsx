@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardHome } from "@/components/dashboard-home";
 import { SoonPage } from "@/components/soon-page";
+import { periodSelectOptions, selectedPeriod } from "@/lib/period-label";
 import { currentPeriodAr } from "@/lib/utils";
 
 type DashboardData = {
@@ -38,6 +40,15 @@ type DashboardData = {
 };
 
 export function DashboardLoader() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const fallback = currentPeriodAr();
+  const period = selectedPeriod(searchParams.get("period"), fallback);
+  const periods = useMemo(
+    () => periodSelectOptions(period, fallback, 24),
+    [period, fallback],
+  );
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missingHome, setMissingHome] = useState(false);
@@ -45,8 +56,9 @@ export function DashboardLoader() {
   useEffect(() => {
     let cancelled = false;
     function load() {
-      const period = currentPeriodAr();
-      void fetch(`/api/dashboard?period=${period}`, { credentials: "include" })
+      void fetch(`/api/dashboard?period=${encodeURIComponent(period)}`, {
+        credentials: "include",
+      })
         .then(async (res) => {
           const body = (await res.json().catch(() => null)) as DashboardData | null;
           if (cancelled) return;
@@ -78,7 +90,15 @@ export function DashboardLoader() {
       window.removeEventListener("lc:household-switched", load);
       window.removeEventListener("lc:expense-created", load);
     };
-  }, []);
+  }, [period]);
+
+  function onPeriodChange(next: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === fallback) params.delete("period");
+    else params.set("period", next);
+    const qs = params.toString();
+    router.replace(qs ? `/dashboard?${qs}` : "/dashboard", { scroll: false });
+  }
 
   if (missingHome) return <SoonPage title="Tu espacio" />;
   if (error) {
@@ -90,7 +110,9 @@ export function DashboardLoader() {
   return (
     <DashboardHome
       firstName={data.firstName}
-      period={data.period}
+      period={period}
+      periods={periods}
+      onPeriodChange={onPeriodChange}
       prevPeriod={data.prevPeriod}
       totalArs={data.totalArs}
       prevTotalArs={data.prevTotalArs}

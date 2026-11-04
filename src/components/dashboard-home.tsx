@@ -324,7 +324,7 @@ function ThemeToggle() {
     <button
       type="button"
       onClick={toggle}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
       aria-label={
         resolved === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"
       }
@@ -541,6 +541,8 @@ function HomeLayoutEditor({
 export function DashboardHome({
   firstName,
   period,
+  periods,
+  onPeriodChange,
   prevPeriod,
   totalArs,
   prevTotalArs,
@@ -562,6 +564,8 @@ export function DashboardHome({
 }: {
   firstName: string;
   period: string;
+  periods?: string[];
+  onPeriodChange?: (period: string) => void;
   prevPeriod: string;
   totalArs: number;
   prevTotalArs: number;
@@ -927,17 +931,32 @@ export function DashboardHome({
           <p className="text-[17px] font-medium tracking-tight text-[var(--foreground)] md:text-xl">
             Hola, {firstName}
           </p>
-          <p className="mt-0.5 text-sm capitalize text-[var(--muted-fg)]">
-            {formatPeriodLabel(period)}
-            {householdName ? ` · ${householdName}` : ""}
-          </p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-[var(--muted-fg)]">
+            {onPeriodChange ? (
+              <select
+                value={period}
+                onChange={(e) => onPeriodChange(e.target.value)}
+                className="lc-input min-h-10 max-w-[12.5rem] py-0 text-sm capitalize"
+                aria-label="Período"
+              >
+                {(periods && periods.length > 0 ? periods : [period]).map((p) => (
+                  <option key={p} value={p}>
+                    {formatPeriodLabel(p)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="capitalize">{formatPeriodLabel(period)}</span>
+            )}
+            {householdName ? <span>· {householdName}</span> : null}
+          </div>
         </div>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => setEditing((v) => !v)}
             className={cn(
-              "inline-flex h-8 w-8 items-center justify-center rounded-full border transition",
+              "inline-flex h-10 w-10 items-center justify-center rounded-full border transition",
               editing
                 ? "border-[var(--brand)]/40 bg-[var(--brand)]/10 text-[var(--brand-fg)]"
                 : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]",
