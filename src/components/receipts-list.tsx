@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useJsonResource } from "@/hooks/use-json-resource";
 import { Trash2 } from "lucide-react";
 import { formatArs, formatDateAr } from "@/lib/utils";
 
@@ -29,25 +30,16 @@ export function ReceiptsList({
   /** Hide delete. The worker list route does not write. */
   readOnly?: boolean;
 }) {
-  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const resource = useJsonResource<{ receipts?: Receipt[] }>(
+    "/api/receipts",
+    [refreshKey ?? 0],
+    { fallbackError: "Error", networkError: "Error" },
+  );
+  const receipts = resource.data?.receipts ?? [];
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? resource.error;
   const [openId, setOpenId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    const res = await fetch("/api/receipts", { credentials: "include" });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || "Error");
-      return;
-    }
-    setReceipts(data.receipts);
-    setError(null);
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load, refreshKey]);
 
   async function removeOne(id: string) {
     if (!confirm("¿Borrar este ticket y el gasto generado si lo hubiera?")) return;
@@ -61,10 +53,11 @@ export function ReceiptsList({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setError(data?.error || "No se pudo borrar");
+        setActionError(data?.error || "No se pudo borrar");
         return;
       }
-      await load();
+      setActionError(null);
+      await resource.reload();
       onChanged?.();
     } finally {
       setBusy(null);
@@ -89,10 +82,11 @@ export function ReceiptsList({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setError(data?.error || "No se pudo borrar");
+        setActionError(data?.error || "No se pudo borrar");
         return;
       }
-      await load();
+      setActionError(null);
+      await resource.reload();
       onChanged?.();
     } finally {
       setBusy(null);

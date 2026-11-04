@@ -5,7 +5,10 @@
  * Deuda stays off the nav (see nav.ts) and is reached from Inicio
  * and the swipe path.
  */
-export function isDeudaEnabled(_value?: string | undefined): boolean {
+export function isDeudaEnabled(value?: string | undefined): boolean {
+  // The old NEXT_PUBLIC_DEUDA_ENABLED value is ignored. The argument stays
+  // so existing callers and tests can keep passing it.
+  void value;
   return true;
 }
 

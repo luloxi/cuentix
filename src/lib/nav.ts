@@ -79,9 +79,10 @@ export function navIncludesDeuda(
 }
 
 /** Home hero: read-only. Never an upload, billing, or add-expense link. */
-export function homeNextAction(_monthTxCount: number): {
+export function homeNextAction(monthTxCount: number): {
   href: "/consumos";
   label: string;
 } {
+  void monthTxCount;
   return { href: "/consumos", label: "Ver consumos" };
 }

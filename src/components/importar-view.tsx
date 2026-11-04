@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
+import { useJsonResource } from "@/hooks/use-json-resource";
 import Link from "next/link";
 import { FileSpreadsheet } from "lucide-react";
 import { EmptyState, LoadingBlock, Surface } from "@/components/ui";
@@ -17,26 +18,27 @@ type CargaItem = {
 };
 
 export function ImportarView() {
-  const [items, setItems] = useState<CargaItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await fetch("/api/cargas", { credentials: "include" });
-      const data = (await res.json().catch(() => null)) as { items?: CargaItem[]; error?: string } | null;
-      if (!res.ok) throw new Error(data?.error || "No se pudieron leer las cargas");
-      setItems((data?.items ?? []).filter((item) => item.kind === "statement"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error de red");
-    }
-  }, []);
+  const { data, error, reload } = useJsonResource<{ items?: CargaItem[] }>(
+    "/api/cargas",
+    [],
+    {
+      fallbackError: "No se pudieron leer las cargas",
+      networkError: "Error de red",
+    },
+  );
+  const items = useMemo(
+    () =>
+      data ? (data.items ?? []).filter((item) => item.kind === "statement") : null,
+    [data],
+  );
 
   useEffect(() => {
-    void load();
-    window.addEventListener("lc:household-switched", load);
-    return () => window.removeEventListener("lc:household-switched", load);
-  }, [load]);
+    function onSwitch() {
+      void reload();
+    }
+    window.addEventListener("lc:household-switched", onSwitch);
+    return () => window.removeEventListener("lc:household-switched", onSwitch);
+  }, [reload]);
 
   if (error) return <p className="text-sm text-red-600">{error}</p>;
   if (!items) return <LoadingBlock label="Cargando resúmenes…" />;
