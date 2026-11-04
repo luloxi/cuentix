@@ -21,6 +21,7 @@ import { handleHouseholdActive, handleMe } from "./household-routes";
 import { flushOutbox } from "./serpix-sync";
 import { handleSvc } from "./svc";
 import { handleTransactions } from "./transactions";
+import { handleFiwindReclassify } from "./reclassify";
 
 const worker = {
   async fetch(req: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
@@ -65,6 +66,7 @@ const worker = {
       if (path === "/api/patrimonio" && req.method === "GET") {
         return await handlePatrimonio(req, env, user);
       }
+      if (path.startsWith("/api/fiwind/")) return await handleFiwindReclassify(req, env, user);
       return notPorted();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Error interno";

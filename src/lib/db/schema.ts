@@ -227,6 +227,7 @@ export const transactions = sqliteTable(
     index("tx_household_date_idx").on(t.householdId, t.date),
     index("tx_household_cat_idx").on(t.householdId, t.categoryId),
     index("tx_household_bank_idx").on(t.householdId, t.bank),
+    index("tx_household_desc_idx").on(t.householdId, t.descriptionNormalized),
     index("tx_linked_idx").on(t.linkedTransactionId),
   ],
 );
