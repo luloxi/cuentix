@@ -16,7 +16,7 @@
     {
       "binding": "DB",
       "database_name": "cuentix-v2",
-      "database_id": "REPLACE_WITH_D1_ID",
+      "database_id": "48b44102-8b71-414a-ad14-48f21302b608",
       "migrations_dir": "migrations"
     }
   ],
