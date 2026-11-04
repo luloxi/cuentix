@@ -18,6 +18,7 @@ function openMigrated(): DatabaseSync {
     "0005_patrimonio_snapshots.sql",
     "0006_patrimonio_user_date.sql",
     "0007_perf_indexes.sql",
+    "0008_tx_household_desc_idx.sql",
   ]) {
     db.exec(readFileSync(join(root, "migrations", file), "utf8"));
   }
@@ -199,5 +200,23 @@ describe("D1 migrations on node:sqlite", () => {
     const names = new Set(indexes.map((row) => row.name));
     assert.ok(names.has("merchant_rules_category_idx"));
     assert.ok(names.has("merchant_rules_household_idx"));
+  });
+
+  it("indexes transactions by household and normalized description", () => {
+    const src = readFileSync(join(root, "migrations", "0008_tx_household_desc_idx.sql"), "utf8");
+    assert.match(src, /CREATE INDEX IF NOT EXISTS tx_household_desc_idx/);
+    assert.match(src, /ON transactions\(household_id, description_normalized\)/);
+    assert.doesNotMatch(src, /\b(DROP|DELETE|UPDATE|INSERT)\b/i);
+    const db = openMigrated();
+    db.exec(src);
+    const row = db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'tx_household_desc_idx'",
+      )
+      .get() as { sql: string };
+    assert.match(row.sql, /household_id/);
+    assert.match(row.sql, /description_normalized/);
+    const schema = readFileSync(join(root, "src/lib/db/schema.ts"), "utf8");
+    assert.match(schema, /tx_household_desc_idx/);
   });
 });

@@ -2,31 +2,33 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LayoutList, LineChart, List } from "lucide-react";
+import { LayoutList, LineChart, List, Wallet } from "lucide-react";
+import { FiwindReclassifyPanel } from "@/components/fiwind-reclassify-panel";
 import { MesAMesView } from "@/components/mes-a-mes";
 import { TransactionsTable } from "@/components/transactions-table";
 import { PageStack, SegmentedControl, Toast } from "@/components/ui";
 
-const TABS = ["lista", "resumen", "charts"] as const;
+const TABS = ["lista", "resumen", "charts", "fiwind"] as const;
 type Tab = (typeof TABS)[number];
 
 function tabFromParam(raw: string | null): Tab {
-  if (raw === "resumen" || raw === "charts" || raw === "lista") return raw;
+  if (raw && (TABS as readonly string[]).includes(raw)) return raw as Tab;
   return "lista";
 }
 
 export function ConsumosWorkspace() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>(() =>
-    tabFromParam(searchParams.get("tab")),
-  );
+  const rawTab = searchParams.get("tab");
+  const paramTab = tabFromParam(rawTab);
+  const [tab, setTab] = useState<Tab>(paramTab);
+  const [syncedRaw, setSyncedRaw] = useState(rawTab);
   const [tableKey, setTableKey] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
-
-  useEffect(() => {
-    setTab(tabFromParam(searchParams.get("tab")));
-  }, [searchParams]);
+  if (rawTab !== syncedRaw) {
+    setSyncedRaw(rawTab);
+    setTab(paramTab);
+  }
 
   useEffect(() => {
     function onCreated() {
@@ -86,6 +88,11 @@ export function ConsumosWorkspace() {
             label: "Gráficos",
             icon: <LineChart className="h-3.5 w-3.5" />,
           },
+          {
+            id: "fiwind",
+            label: "Fiwind",
+            icon: <Wallet className="h-3.5 w-3.5" />,
+          },
         ]}
       />
 
@@ -102,6 +109,8 @@ export function ConsumosWorkspace() {
       <div className="min-h-[40vh]">
         {tab === "lista" ? (
           <TransactionsTable key={tableKey} />
+        ) : tab === "fiwind" ? (
+          <FiwindReclassifyPanel key={tableKey} onToast={setToast} />
         ) : (
           <MesAMesView mode={tab === "charts" ? "charts" : "resumen"} />
         )}

@@ -30,6 +30,7 @@ import { handleIncomes } from "./incomes-api";
 import { flushOutbox } from "./serpix-sync";
 import { handleSvc } from "./svc";
 import { handleTransactions } from "./transactions";
+import { handleFiwindReclassify } from "./reclassify";
 
 const worker = {
   async fetch(req: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
@@ -89,6 +90,7 @@ const worker = {
       if (path === "/api/receipts") return await handleReceipts(req, env, user);
       if (path === "/api/admin/allowed-emails") return await handleAllowedEmails(req, env, user);
       if (path === "/api/household/agent-token") return await handleAgentToken(req, env, user);
+      if (path.startsWith("/api/fiwind/")) return await handleFiwindReclassify(req, env, user);
       return notPorted();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Error interno";
