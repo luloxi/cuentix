@@ -19,8 +19,11 @@ describe("legacy host", () => {
     assert.equal(response?.headers.get("location"), "https://tarask.lulox.com.ar/");
   });
 
-  it("leaves /api on the old host (Google OAuth callback)", () => {
-    assert.equal(redirectLegacyHost(new Request(`${OLD}/api/auth/callback/google?code=a&state=b`)), null);
+  it("leaves /api on the old host except the Google callback", () => {
+    assert.equal(
+      redirectLegacyHost(new Request(`${OLD}/api/auth/callback/google?code=a&state=b`))?.headers.get("location"),
+      "https://tarask.lulox.com.ar/api/auth/callback/google?code=a&state=b",
+    );
     assert.equal(redirectLegacyHost(new Request(`${OLD}/api/me`)), null);
     assert.equal(redirectLegacyHost(new Request(`${OLD}/apiary`))?.status, 301);
   });
