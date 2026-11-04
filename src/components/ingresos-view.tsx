@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useJsonResource } from "@/hooks/use-json-resource";
+import { readScoped, scoped, type Scoped } from "@/lib/scoped-state";
 import { LineChart, Trash2 } from "lucide-react";
 import { TotalSpendChart } from "@/components/spend-charts";
 import {
@@ -78,9 +79,15 @@ export function IngresosView() {
   );
   const loading = resource.loading;
   const [saving, setSaving] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionErrorState, setActionErrorState] = useState<Scoped<string> | null>(null);
+  const [okState, setOkState] = useState<Scoped<string> | null>(null);
+  const actionError = readScoped(actionErrorState, period);
+  const ok = readScoped(okState, period);
   const error = actionError ?? resource.error;
-  const [ok, setOk] = useState<string | null>(null);
+  const setActionError = (message: string | null) =>
+    setActionErrorState(message == null ? null : scoped(period, message));
+  const setOk = (message: string | null) =>
+    setOkState(message == null ? null : scoped(period, message));
   const [mode, setMode] = useState<FormMode>("recurring");
 
   const [date, setDate] = useState(todayDateAr);

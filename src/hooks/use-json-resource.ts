@@ -22,7 +22,7 @@ export type ResourceOptions = {
   networkError?: string;
 };
 
-type Waiter = {
+export type Waiter = {
   resolve: () => void;
   reject: (error: unknown) => void;
 };
@@ -60,16 +60,22 @@ export async function readJson<T>(
   return body as T;
 }
 
-function settleWaiters(
+/**
+ * Settle the waiter for `token` and every older one. An older waiter whose
+ * fetch never started (two reloads batched into one render) or was aborted
+ * would otherwise hang its caller forever.
+ */
+export function settleWaiters(
   waiters: Map<number, Waiter>,
   token: number,
   error: unknown | undefined,
 ) {
-  const waiter = waiters.get(token);
-  if (!waiter) return;
-  waiters.delete(token);
-  if (error === undefined) waiter.resolve();
-  else waiter.reject(error);
+  for (const [key, waiter] of [...waiters]) {
+    if (key > token) continue;
+    waiters.delete(key);
+    if (error === undefined) waiter.resolve();
+    else waiter.reject(error);
+  }
 }
 
 /**
@@ -109,9 +115,13 @@ export function useJsonResource<T>(
   }
 
   useEffect(() => {
-    if (!url) return;
-    const ac = new AbortController();
     const token = reloadToken;
+    const pending = waiters.current;
+    if (!url) {
+      settleWaiters(pending, token, undefined);
+      return;
+    }
+    const ac = new AbortController();
     fetch(url, { credentials: "include", signal: ac.signal })
       .then((res) => readJson<T>(res, fallbackError))
       .then((body) => {
@@ -133,7 +143,12 @@ export function useJsonResource<T>(
           e instanceof Error ? e : new Error(message),
         );
       });
-    return () => ac.abort();
+    return () => {
+      ac.abort();
+      // Aborted (url/deps changed, newer reload, or unmount): resolve so
+      // `await reload()` callers continue instead of hanging.
+      settleWaiters(pending, token, undefined);
+    };
   }, [url, requestKey, reloadToken, fallbackError, networkError]);
 
   const reload = useCallback(() => {
