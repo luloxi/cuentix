@@ -1,5 +1,5 @@
-import { SoonPage } from "@/components/soon-page";
+import { McpSetupView } from "@/components/mcp-setup-view";
 
 export default function Page() {
-  return <SoonPage title="MCP" />;
+  return <McpSetupView />;
 }

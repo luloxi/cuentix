@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LayoutList, LineChart, List } from "lucide-react";
+import { MesAMesView } from "@/components/mes-a-mes";
 import { TransactionsTable } from "@/components/transactions-table";
-import { SoonPage } from "@/components/soon-page";
 import { PageStack, SegmentedControl, Toast } from "@/components/ui";
 
 const TABS = ["lista", "resumen", "charts"] as const;
@@ -103,7 +103,7 @@ export function ConsumosWorkspace() {
         {tab === "lista" ? (
           <TransactionsTable key={tableKey} />
         ) : (
-          <SoonPage title={tab === "charts" ? "Gráficos" : "Resumen"} />
+          <MesAMesView mode={tab === "charts" ? "charts" : "resumen"} />
         )}
       </div>
     </PageStack>

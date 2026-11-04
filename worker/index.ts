@@ -5,11 +5,16 @@ import {
   isUser,
   requireUser,
 } from "./auth";
+import { handleAgentToken } from "./agent-token";
+import { handleAllowedEmails } from "./allowed-emails";
 import { handleBillingSubscription } from "./billing";
 import { handleCargas } from "./cargas";
 import { handleCategories } from "./categories";
 import { handleCompartidoStats } from "./compartido";
 import { handleDashboard } from "./dashboard";
+import { handleGrupo } from "./grupo";
+import { handleMesAMes } from "./mes-a-mes";
+import { handleReceipts } from "./receipts";
 import type { Env, WorkerContext } from "./env";
 import {
   captureDailySnapshots,
@@ -79,6 +84,11 @@ const worker = {
       if (path === "/api/billing/subscription" && req.method === "GET") {
         return await handleBillingSubscription(req, env, user);
       }
+      if (path === "/api/stats/mes-a-mes") return await handleMesAMes(req, env, user);
+      if (path === "/api/grupo") return await handleGrupo(req, env, user);
+      if (path === "/api/receipts") return await handleReceipts(req, env, user);
+      if (path === "/api/admin/allowed-emails") return await handleAllowedEmails(req, env, user);
+      if (path === "/api/household/agent-token") return await handleAgentToken(req, env, user);
       return notPorted();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Error interno";

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardHome } from "@/components/dashboard-home";
-import { SoonPage } from "@/components/soon-page";
 import { periodSelectOptions, selectedPeriod } from "@/lib/period-label";
 import { currentPeriodAr } from "@/lib/utils";
 
@@ -100,7 +100,19 @@ export function DashboardLoader() {
     router.replace(qs ? `/dashboard?${qs}` : "/dashboard", { scroll: false });
   }
 
-  if (missingHome) return <SoonPage title="Tu espacio" />;
+  if (missingHome) {
+    return (
+      <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center px-4 py-20 text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">Tu espacio</h1>
+        <p className="mt-3 max-w-sm text-sm text-[var(--muted-fg)]">
+          Esta cuenta todavía no tiene un hogar.
+        </p>
+        <Link href="/onboarding" className="lc-btn lc-btn-primary mt-6">
+          Ir a tu espacio
+        </Link>
+      </div>
+    );
+  }
   if (error) {
     return <p className="text-sm text-red-600">{error}</p>;
   }

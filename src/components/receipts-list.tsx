@@ -22,9 +22,12 @@ type Receipt = {
 export function ReceiptsList({
   refreshKey,
   onChanged,
+  readOnly = false,
 }: {
   refreshKey?: number;
   onChanged?: () => void;
+  /** Hide delete. The worker list route does not write. */
+  readOnly?: boolean;
 }) {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -112,14 +115,16 @@ export function ReceiptsList({
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-zinc-500">{receipts.length} ticket(s)</p>
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={() => void removeAll()}
-          className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
-        >
-          {busy === "all" ? "Borrando…" : "Borrar todos"}
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => void removeAll()}
+            className="inline-flex min-h-10 items-center text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+          >
+            {busy === "all" ? "Borrando…" : "Borrar todos"}
+          </button>
+        )}
       </div>
       {receipts.map((r) => (
         <div
@@ -130,7 +135,7 @@ export function ReceiptsList({
             <button
               type="button"
               onClick={() => setOpenId(openId === r.id ? null : r.id)}
-              className="min-w-0 flex-1 text-left"
+              className="flex min-h-10 min-w-0 flex-1 items-center text-left"
             >
               <div className="font-medium">
                 {r.merchantName || "Ticket"}
@@ -144,15 +149,17 @@ export function ReceiptsList({
             <div className="font-semibold tabular-nums text-sm">
               {formatArs(r.totalArs)}
             </div>
-            <button
-              type="button"
-              title="Borrar ticket"
-              disabled={busy === r.id}
-              onClick={() => void removeOne(r.id)}
-              className="rounded-lg p-2 text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/40"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                title="Borrar ticket"
+                disabled={busy === r.id}
+                onClick={() => void removeOne(r.id)}
+                className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/40"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
           </div>
           {openId === r.id && (
             <ul className="border-t border-zinc-100 px-4 py-2 text-sm dark:border-zinc-800">

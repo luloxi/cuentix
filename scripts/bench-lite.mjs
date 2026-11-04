@@ -39,7 +39,7 @@ const ROUTES = [
   { name: "GET /api/transactions?limit=10 (no period)", path: "/api/transactions?limit=10&offset=0", auth: true, expect: [200] },
   { name: "GET /api/categories", path: "/api/categories", auth: true, expect: [200] },
   { name: "GET /api/household/active", path: "/api/household/active", auth: true, expect: [200] },
-  { name: "GET /api/stats/mes-a-mes (stage 2)", path: "/api/stats/mes-a-mes", auth: true, expect: [501] },
+  { name: "GET /api/stats/mes-a-mes", path: "/api/stats/mes-a-mes", auth: true, expect: [200] },
 ];
 
 function d1(command) {
