@@ -26,13 +26,16 @@ export function isPersonalName(name: string): boolean {
   return PERSONAL_NAMES.has(name.trim().toLowerCase());
 }
 
-export async function listHouseholds(env: Env, userId: string): Promise<HouseholdRow[]> {
-  const res = await env.DB.prepare(
-    `SELECT h.id AS id, h.name AS name, m.role AS role, m.joined_at AS joined_at
+/** Newest membership first, bounded. A hogar just created is list[0]. hm_user_idx filters the user. */
+export const LIST_HOUSEHOLDS_SQL = `SELECT h.id AS id, h.name AS name, m.role AS role, m.joined_at AS joined_at
      FROM household_members m
      INNER JOIN households h ON h.id = m.household_id
-     WHERE m.user_id = ?`,
-  )
+     WHERE m.user_id = ?
+     ORDER BY m.joined_at DESC, h.id DESC
+     LIMIT 50`;
+
+export async function listHouseholds(env: Env, userId: string): Promise<HouseholdRow[]> {
+  const res = await env.DB.prepare(LIST_HOUSEHOLDS_SQL)
     .bind(userId)
     .all<{ id: string; name: string; role: "owner" | "member"; joined_at: number | null }>();
   return (res.results ?? []).map((row) => ({

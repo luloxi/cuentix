@@ -167,17 +167,38 @@ export function CompartidoView() {
         period === "all"
           ? "?period=all"
           : `?period=${encodeURIComponent(period)}`;
-      const res = await fetch(`/api/stats/compartido${q}`, {
-        credentials: "include",
-      });
+      const [idRes, res] = await Promise.all([
+        fetch("/api/household", { credentials: "include" }),
+        fetch(`/api/stats/compartido${q}`, { credentials: "include" }),
+      ]);
+      const idJson = (await idRes.json().catch(() => null)) as {
+        household?: { household?: { name?: string; inviteCode?: string } } | null;
+      } | null;
+      const hh = idRes.ok ? idJson?.household?.household : undefined;
+      const apiName = hh?.name ?? "";
+      const apiInvite = hh?.inviteCode ?? "";
+      if (idRes.ok) {
+        setHouseholdName(apiName);
+        setInviteCode(apiInvite);
+      }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error");
+      if (!res.ok) {
+        setExpenses([]);
+        setCategories([]);
+        setMembers([]);
+        setPeriods([]);
+        setTotal(0);
+        setExpenseCount(0);
+        setPrevPeriod(null);
+        setPrevTotalArs(0);
+        throw new Error(data.error || "Error");
+      }
       setExpenses(data.expenses ?? []);
       setCategories(data.categories ?? []);
       setPeriods(data.periods ?? []);
       setMembers(data.members ?? []);
-      setInviteCode(data.inviteCode ?? "");
-      setHouseholdName(data.householdName ?? "");
+      setInviteCode(data.inviteCode || apiInvite);
+      setHouseholdName(data.householdName || apiName);
       setPrevPeriod(data.prevPeriod ?? null);
       setPrevTotalArs(data.prevTotalArs ?? 0);
       setTotal(data.summary?.totalArsCombined ?? 0);
@@ -303,10 +324,10 @@ export function CompartidoView() {
   const allFixedPaid =
     applicableCount > 0 && paidCount === applicableCount;
 
-  if (loading && expenses.length === 0 && total === 0 && viewTab === "vista") {
+  if (loading && expenses.length === 0 && total === 0 && viewTab === "vista" && !inviteCode) {
     return <HogarSkeleton />;
   }
-  if (error) {
+  if (error && !inviteCode && !householdName) {
     return (
       <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40">
         {error}
@@ -337,6 +358,11 @@ export function CompartidoView() {
 
   return (
     <PageStack className="!space-y-4">
+      {error && (
+        <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+          {error}
+        </p>
+      )}
       <SegmentedControl
         value={viewTab}
         onChange={onViewTab}
@@ -366,7 +392,7 @@ export function CompartidoView() {
             <button
               type="button"
               onClick={() => setInviteOpen(true)}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-semibold text-[var(--brand-fg)] transition hover:bg-[var(--brand-soft)]"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-semibold text-[var(--brand-fg)] transition hover:bg-[var(--brand-soft)]"
             >
               <UserPlus className="h-3.5 w-3.5" />
               Invitar
@@ -775,7 +801,7 @@ export function CompartidoView() {
         >
           <button
             type="button"
-            className="absolute inset-0 bg-[#121110]/55 backdrop-blur-[2px]"
+            className="absolute inset-0 cursor-pointer bg-[#121110]/55 backdrop-blur-[2px]"
             aria-label="Cerrar"
             onClick={() => setInviteOpen(false)}
           />
@@ -792,7 +818,7 @@ export function CompartidoView() {
               <button
                 type="button"
                 onClick={() => setInviteOpen(false)}
-                className="rounded-full p-1.5 text-[var(--muted-fg)] hover:bg-[var(--surface-muted)]"
+                className="min-h-11 min-w-11 cursor-pointer rounded-full p-1.5 text-[var(--muted-fg)] hover:bg-[var(--surface-muted)]"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -807,7 +833,7 @@ export function CompartidoView() {
                 <button
                   type="button"
                   onClick={() => void copyText(inviteCode, "code")}
-                  className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-fg)]"
+                  className="mt-2 inline-flex min-h-11 cursor-pointer items-center gap-1.5 text-sm font-semibold text-[var(--brand-fg)]"
                 >
                   <Copy className="h-3.5 w-3.5" />
                   {copied === "code" ? "¡Copiado!" : "Copiar código"}
@@ -823,7 +849,7 @@ export function CompartidoView() {
                   <button
                     type="button"
                     onClick={() => void copyText(inviteLink, "link")}
-                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--brand-fg)]"
+                    className="mt-2 inline-flex min-h-11 cursor-pointer items-center gap-1.5 text-sm font-semibold text-[var(--brand-fg)]"
                   >
                     <Link2 className="h-3.5 w-3.5" />
                     {copied === "link" ? "¡Copiado!" : "Copiar link"}

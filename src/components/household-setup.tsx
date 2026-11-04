@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BrandLogo } from "@/components/brand-logo";
+import { validateHouseholdName } from "@/lib/household-name";
 import { Home, User, UserPlus } from "lucide-react";
 
 export function HouseholdSetup() {
@@ -17,8 +18,13 @@ export function HouseholdSetup() {
   const [loading, setLoading] = useState<
     "create" | "join" | "solo" | null
   >(null);
+  const nameCheck = validateHouseholdName(name, { allowPersonal: false });
 
   async function create() {
+    if (!nameCheck.ok) {
+      setError(nameCheck.error);
+      return;
+    }
     setLoading("create");
     setError(null);
     try {
@@ -26,7 +32,7 @@ export function HouseholdSetup() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ action: "create", name }),
+        body: JSON.stringify({ action: "create", name: nameCheck.name }),
       });
       const data = (await res.json().catch(() => null)) as {
         error?: string;
@@ -36,6 +42,8 @@ export function HouseholdSetup() {
         return;
       }
       router.refresh();
+      window.dispatchEvent(new Event("lc:household-switched"));
+      window.dispatchEvent(new Event("lc:household-created"));
       router.push("/compartido");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error de red");
@@ -151,18 +159,37 @@ export function HouseholdSetup() {
               Podés usarlo solo. Si más adelante querés sumar a alguien, hay un
               Invitar opcional en Hogar.
             </p>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="lc-input w-full"
-              placeholder="Nombre del hogar"
-              disabled={loading !== null}
-            />
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-[var(--muted-fg)]">Nombre</span>
+              <input
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void create();
+                  }
+                }}
+                className="lc-input min-h-11 w-full text-base"
+                placeholder="Nombre del hogar"
+                maxLength={60}
+                disabled={loading !== null}
+                enterKeyHint="done"
+                autoComplete="off"
+                aria-invalid={!nameCheck.ok || undefined}
+              />
+            </label>
+            {!nameCheck.ok && (
+              <p className="text-sm text-red-700 dark:text-red-200">{nameCheck.error}</p>
+            )}
             <button
               type="button"
-              disabled={loading !== null}
+              disabled={loading !== null || !nameCheck.ok}
               onClick={() => void create()}
-              className="lc-btn lc-btn-primary w-full"
+              className="lc-btn lc-btn-primary min-h-11 w-full cursor-pointer disabled:cursor-not-allowed"
             >
               {loading === "create" ? "Creando…" : "Crear hogar"}
             </button>
@@ -197,7 +224,7 @@ export function HouseholdSetup() {
             type="button"
             disabled={loading !== null}
             onClick={() => void continueSolo()}
-            className="flex w-full items-center gap-3 px-2 py-2 text-left text-sm text-[var(--muted-fg)] transition hover:text-[var(--foreground)] disabled:opacity-60"
+            className="flex min-h-11 w-full cursor-pointer items-center gap-3 px-2 py-2 text-left text-sm text-[var(--muted-fg)] transition hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <User className="h-4 w-4 shrink-0" />
             <span>

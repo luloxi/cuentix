@@ -17,6 +17,7 @@ import {
   handlePatrimonioSnapshot,
 } from "./finance";
 import { json, notPorted } from "./http";
+import { handleHouseholdCreate } from "./household-create";
 import { handleHouseholdActive, handleMe } from "./household-routes";
 import { flushOutbox } from "./serpix-sync";
 import { handleSvc } from "./svc";
@@ -55,6 +56,7 @@ const worker = {
       if (path === "/api/categories" && req.method === "GET") {
         return await handleCategories(req, env, user);
       }
+      if (path === "/api/household") return await handleHouseholdCreate(req, env, user);
       if (path === "/api/household/active") return await handleHouseholdActive(req, env, user);
       if (path === "/api/ahorros") return await handleAhorros(req, env, user);
       if (path === "/api/debt-settings") return await handleDebtSettings(req, env, user);
