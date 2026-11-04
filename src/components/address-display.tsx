@@ -67,12 +67,12 @@ export function AddressDisplay({
       onClick={() => void copy()}
       title={address}
       className={cn(
-        "inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)]/60 px-2 py-0.5 text-left transition hover:bg-[var(--surface-muted)]",
+        "inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)]/60 px-3 py-0.5 text-left transition hover:bg-[var(--surface-muted)]",
         className,
       )}
     >
       <AddressBlockie address={address} avatarUrl={avatarUrl} size={16} />
-      <span className="min-w-0 truncate text-[11px] font-medium">
+      <span className="min-w-0 truncate text-[13px] font-medium">
         {ens ? (
           <span className="text-[var(--brand-fg)]">{ens}</span>
         ) : (

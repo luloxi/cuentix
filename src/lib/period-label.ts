@@ -9,6 +9,14 @@ export function formatPeriodLabel(period: string): string {
   }).format(d);
 }
 
+/** "Noviembre 2026": mes con mayúscula y año, sin el "de". Entra mejor en el celu. */
+export function formatPeriodTitle(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  if (!y || !m) return period;
+  const name = new Intl.DateTimeFormat("es-AR", { month: "long" }).format(new Date(y, m - 1, 1));
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${y}`;
+}
+
 /** Short label: "jul 26" */
 export function formatPeriodShort(period: string): string {
   const [y, m] = period.split("-").map(Number);

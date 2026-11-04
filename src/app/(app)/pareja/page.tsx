@@ -1,17 +1,15 @@
 import { Suspense } from "react";
 import { GrupoView } from "@/components/grupo-view";
+import { SectionNav } from "@/components/section-nav";
 import { LoadingBlock, PageHeader, PageStack } from "@/components/ui";
 
-/** Legacy name. The shared balance lives in Grupo. */
+/** Nombre viejo. El balance compartido vive en Grupo. */
 export default function Page() {
   return (
     <Suspense fallback={<LoadingBlock label="Cargando grupo…" />}>
       <PageStack>
-        <PageHeader
-          eyebrow="Hogar"
-          title="Pareja"
-          description="El balance compartido del grupo."
-        />
+        <PageHeader title="Grupo" description="El balance compartido del grupo." />
+        <SectionNav section="hogar" />
         <GrupoView />
       </PageStack>
     </Suspense>

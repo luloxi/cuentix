@@ -192,7 +192,7 @@ export function LoginClient() {
                 type="button"
                 disabled={loading}
                 onClick={signInGoogle}
-                className="flex w-full cursor-pointer items-center justify-center gap-2.5 rounded-2xl bg-zinc-900 px-4 py-3.5 text-sm font-medium text-white shadow-lg shadow-zinc-900/20 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+                className="flex w-full cursor-pointer items-center justify-center gap-2.5 rounded-2xl bg-[var(--surface)] border border-[var(--border-strong)] px-4 py-3.5 text-[15px] font-semibold text-[var(--text)] shadow-[var(--card-shadow)] transition hover:bg-[var(--surface-muted)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <GoogleMark />
                 {loading ? "Redirigiendo…" : "Continuar con Google"}

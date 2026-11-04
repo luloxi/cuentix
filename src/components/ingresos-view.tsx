@@ -6,6 +6,7 @@ import { useJsonResource } from "@/hooks/use-json-resource";
 import { readScoped, scoped, type Scoped } from "@/lib/scoped-state";
 import { LineChart, Trash2 } from "lucide-react";
 import { TotalSpendChart } from "@/components/spend-charts";
+import { SectionNav } from "@/components/section-nav";
 import {
   EmptyState,
   FieldLabel,
@@ -26,6 +27,7 @@ import {
 } from "@/lib/utils";
 import {
   formatPeriodLabel,
+  formatPeriodTitle,
   periodSelectOptions,
   selectedPeriod,
 } from "@/lib/period-label";
@@ -187,17 +189,19 @@ export function IngresosView() {
           <select
             value={period}
             onChange={(e) => onPeriodChange(e.target.value)}
-            className="lc-input min-h-10 min-w-[10rem] capitalize"
+            className="lc-input min-h-11 min-w-[10rem]"
             aria-label="Período"
           >
             {periods.map((p) => (
               <option key={p} value={p}>
-                {formatPeriodLabel(p)}
+                {formatPeriodTitle(p)}
               </option>
             ))}
           </select>
         }
       />
+
+      <SectionNav section="movimientos" />
 
       {error && (
         <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40">

@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { LayoutList, LineChart, List, Wallet } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { FiwindReclassifyPanel } from "@/components/fiwind-reclassify-panel";
 import { MesAMesView } from "@/components/mes-a-mes";
 import { TransactionsTable } from "@/components/transactions-table";
-import { PageStack, SegmentedControl, Toast } from "@/components/ui";
+import { SectionNav } from "@/components/section-nav";
+import { PageStack, Toast } from "@/components/ui";
 
 type Tab = "lista" | "resumen" | "charts" | "fiwind";
 
@@ -17,14 +17,8 @@ function tabFromParam(raw: string | null): Tab {
 
 export function ConsumosWorkspace() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const urlTab = tabFromParam(searchParams.get("tab"));
-  const [tab, setTab] = useState<Tab>(urlTab);
-  const [seenTab, setSeenTab] = useState(urlTab);
-  if (urlTab !== seenTab) {
-    setSeenTab(urlTab);
-    setTab(urlTab);
-  }
+  const tab = urlTab;
   const [tableKey, setTableKey] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -56,43 +50,21 @@ export function ConsumosWorkspace() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const onTab = useCallback(
-    (v: Tab) => {
-      setTab(v);
-      router.replace(`/consumos?tab=${v}`, { scroll: false });
-    },
-    [router],
-  );
-
   return (
     <PageStack className="!space-y-4">
-      <SegmentedControl
-        value={tab}
-        onChange={onTab}
-        className="w-full"
-        options={[
-          {
-            id: "lista",
-            label: "Lista",
-            icon: <List className="h-3.5 w-3.5" />,
-          },
-          {
-            id: "resumen",
-            label: "Resumen",
-            icon: <LayoutList className="h-3.5 w-3.5" />,
-          },
-          {
-            id: "charts",
-            label: "Gráficos",
-            icon: <LineChart className="h-3.5 w-3.5" />,
-          },
-          {
-            id: "fiwind",
-            label: "Fiwind",
-            icon: <Wallet className="h-3.5 w-3.5" />,
-          },
-        ]}
-      />
+      <header>
+        <h1 className="text-[1.6rem] font-semibold leading-tight tracking-tight">Movimientos</h1>
+        <p className="mt-1 text-[15px] text-[var(--muted-fg)]">
+          {tab === "lista"
+            ? "Todo lo que gastaste. Tocá un movimiento para corregirlo."
+            : tab === "resumen"
+              ? "Cuánto gastaste en cada categoría, mes por mes."
+              : tab === "charts"
+                ? "Cómo viene tu gasto, en gráficos."
+                : "Movimientos de Fiwind para revisar."}
+        </p>
+      </header>
+      <SectionNav section="movimientos" />
 
       {toast && (
         <Toast>

@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  NAV_HREFS,
-  NAV_LINKS,
+  MAIN_TABS,
+  SECTION_TABS,
+  activeMainTab,
+  activeSectionTab,
   homeNextAction,
+  isMoreActive,
   isUnlistedNavHref,
-  navIncludesDeuda,
-  navLinksFor,
-  splitMobileNav,
+  moreLinksFor,
 } from "./nav";
 import { DEUDA_ENABLED, isDeudaEnabled } from "./features";
 import {
@@ -17,108 +18,80 @@ import {
   stepToHref,
 } from "./swipe-path";
 
-describe("section nav", () => {
-  const labels = [
-    "Inicio",
-    "Consumos",
-    "Ingresos",
-    "Hogar",
-    "Análisis",
-    "Mes a mes",
-    "Grupo",
-    "Supermercado",
-    "MCP",
-  ];
-  const hrefs = [
-    "/dashboard",
-    "/consumos",
-    "/ingresos",
-    "/compartido",
-    "/analisis",
-    "/mes-a-mes",
-    "/grupo",
-    "/supermercado",
-    "/mcp",
-  ];
-
-  it("lists every working read-only section", () => {
+describe("nav del rediseño", () => {
+  it("la barra tiene 4 pestañas en lenguaje simple", () => {
     assert.deepEqual(
-      NAV_LINKS.map((l) => l.label),
-      labels,
+      MAIN_TABS.map((t) => t.label),
+      ["Resumen", "Movimientos", "Patrimonio", "Hogar"],
     );
-    assert.deepEqual([...NAV_HREFS], hrefs);
-    assert.equal(NAV_LINKS.length, 9);
+    assert.deepEqual(
+      MAIN_TABS.map((t) => t.href),
+      ["/dashboard", "/consumos", "/patrimonio", "/compartido"],
+    );
   });
 
-  it("adds Administración only for admins", () => {
-    const guest = navLinksFor(false);
-    assert.equal(
-      guest.some((l) => l.href === "/admin" || l.label === "Administración"),
-      false,
-    );
-    const admin = navLinksFor(true);
+  it("Más lleva Categorías y MCP, y Administración solo para admins", () => {
+    const guest = moreLinksFor(false);
+    assert.deepEqual(guest.map((l) => l.href), ["/categorias", "/mcp"]);
+    const admin = moreLinksFor(true);
     assert.equal(admin.at(-1)?.href, "/admin");
     assert.equal(admin.at(-1)?.label, "Administración");
-    assert.deepEqual(
-      admin.slice(0, -1).map((l) => l.label),
-      labels,
-    );
+    assert.equal(guest.some((l) => l.href === "/admin"), false);
   });
 
-  it("keeps Compartir, Suscripción, Importar, Cargas and add-expense unlisted", () => {
-    for (const links of [navLinksFor(false), navLinksFor(true)]) {
-      const listedHrefs = links.map((l) => l.href);
-      const listedLabels = links.map((l) => l.label);
-      for (const href of [
-        "/share-target",
-        "/suscripcion",
-        "/importar",
-        "/cargas",
-        "/deuda",
-      ]) {
-        assert.equal(
-          listedHrefs.some((h) => h === href),
-          false,
-        );
-        assert.equal(isUnlistedNavHref(href), true);
-      }
-      for (const label of [
-        "Compartir",
-        "Suscripción",
-        "Importar",
-        "Cargas",
-        "Sumar",
-        "Deuda",
-      ]) {
-        assert.equal(listedLabels.includes(label), false);
-      }
+  it("cada ruta vieja cae en una pestaña (no se perdió ninguna pantalla)", () => {
+    const expected: Record<string, string> = {
+      "/dashboard": "/dashboard",
+      "/consumos": "/consumos",
+      "/ingresos": "/consumos",
+      "/mes-a-mes": "/consumos",
+      "/analisis": "/consumos",
+      "/patrimonio": "/patrimonio",
+      "/ahorros": "/patrimonio",
+      "/deuda": "/patrimonio",
+      "/deuda/detalle": "/patrimonio",
+      "/compartido": "/compartido",
+      "/grupo": "/compartido",
+      "/pareja": "/compartido",
+      "/supermercado": "/compartido",
+    };
+    for (const [path, tab] of Object.entries(expected)) {
+      assert.equal(activeMainTab(path), tab, path);
+      assert.equal(activeMainTab(`${path}/`), tab, `${path}/`);
     }
+    assert.equal(activeMainTab("/categorias"), null);
+    assert.equal(isMoreActive("/categorias"), true);
+    assert.equal(isMoreActive("/mcp"), true);
+    assert.equal(isMoreActive("/dashboard"), false);
   });
 
-  it("puts the overflow in Más on mobile", () => {
-    const everyone = splitMobileNav(navLinksFor(false));
-    assert.deepEqual(
-      everyone.bar.map((l) => l.label),
-      ["Inicio", "Consumos", "Ingresos", "Hogar"],
-    );
-    assert.deepEqual(
-      everyone.more.map((l) => l.label),
-      ["Análisis", "Mes a mes", "Grupo", "Supermercado", "MCP"],
-    );
-    const admin = splitMobileNav(navLinksFor(true));
-    assert.equal(admin.bar.length, 4);
-    assert.equal(admin.more.at(-1)?.label, "Administración");
-    assert.ok(admin.more.length > 1);
-    assert.deepEqual(
-      [...admin.bar, ...admin.more].map((l) => l.href),
-      navLinksFor(true).map((l) => l.href),
-    );
+  it("los chips de Movimientos distinguen Gastos, Por mes, Gráficos y Fiwind", () => {
+    assert.equal(activeSectionTab("movimientos", "/consumos", null), "gastos");
+    assert.equal(activeSectionTab("movimientos", "/consumos", "lista"), "gastos");
+    assert.equal(activeSectionTab("movimientos", "/consumos", "resumen"), "por-mes");
+    assert.equal(activeSectionTab("movimientos", "/consumos", "charts"), "graficos");
+    assert.equal(activeSectionTab("movimientos", "/consumos", "fiwind"), "fiwind");
+    assert.equal(activeSectionTab("movimientos", "/ingresos", null), "ingresos");
   });
 
-  it("never puts Deuda in the bar, even if the flag is on", () => {
-    assert.equal(navIncludesDeuda(), false);
-    assert.equal(navIncludesDeuda([...NAV_HREFS, "/admin"]), false);
-    assert.equal(navIncludesDeuda(["/dashboard", "/deuda"]), true);
+  it("los chips de Patrimonio y Hogar apuntan a las rutas de siempre", () => {
+    assert.deepEqual(
+      SECTION_TABS.patrimonio.map((t) => t.href),
+      ["/patrimonio", "/ahorros", "/deuda"],
+    );
+    assert.deepEqual(
+      SECTION_TABS.hogar.map((t) => t.href),
+      ["/compartido", "/grupo", "/supermercado"],
+    );
+    assert.equal(activeSectionTab("patrimonio", "/deuda", null), "deuda");
+    assert.equal(activeSectionTab("hogar", "/supermercado", null), "super");
+  });
+
+  it("Suscripción, Importar, Cargas y Compartir siguen fuera de la navegación", () => {
+    for (const href of ["/share-target", "/suscripcion", "/importar", "/cargas"]) {
+      assert.equal(isUnlistedNavHref(href), true);
+      assert.equal(MAIN_TABS.some((t) => t.href === href), false);
+    }
   });
 });
 
@@ -162,7 +135,7 @@ describe("home next action", () => {
     for (const n of [0, -1, 1, 12]) {
       assert.deepEqual(homeNextAction(n), {
         href: "/consumos",
-        label: "Ver consumos",
+        label: "Ver movimientos",
       });
     }
   });

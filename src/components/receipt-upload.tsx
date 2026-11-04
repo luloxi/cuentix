@@ -94,7 +94,7 @@ export function ReceiptUpload({ onDone }: { onDone?: () => void }) {
   return (
     <div className="space-y-4">
       <label className="flex cursor-pointer flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 px-6 py-10 text-center dark:border-emerald-800 dark:bg-emerald-950/20">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--ok)] text-[var(--on-accent)]">
           {loading ? (
             <Loader2 className="h-7 w-7 animate-spin" />
           ) : (
@@ -116,7 +116,7 @@ export function ReceiptUpload({ onDone }: { onDone?: () => void }) {
           onChange={(ev) => void onChange(ev)}
           disabled={loading}
         />
-        <span className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white">
+        <span className="rounded-lg bg-[var(--ok)] px-4 py-2 text-sm font-medium text-[var(--on-accent)]">
           {loading ? "Procesando…" : "Sacar o elegir foto"}
         </span>
       </label>

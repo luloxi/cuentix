@@ -196,7 +196,7 @@ export function ImportForm({
           }
         >
           {!compact && (
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--brand)] text-white dark:text-[#121110]">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--brand)] text-[var(--on-accent)]">
               <FileSpreadsheet className="h-7 w-7" />
             </div>
           )}

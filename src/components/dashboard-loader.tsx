@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardHome } from "@/components/dashboard-home";
+import { DashboardSkeleton } from "@/components/ui";
 import { periodSelectOptions, selectedPeriod } from "@/lib/period-label";
 import { currentPeriodAr } from "@/lib/utils";
 
@@ -114,10 +115,10 @@ export function DashboardLoader() {
     );
   }
   if (error) {
-    return <p className="text-sm text-red-600">{error}</p>;
+    return <p className="text-[15px] text-[var(--err-text)]">{error}</p>;
   }
   if (!data) {
-    return <p className="text-sm text-[var(--muted-fg)]">Cargando inicio…</p>;
+    return <DashboardSkeleton />;
   }
   return (
     <DashboardHome

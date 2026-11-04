@@ -1,18 +1,6 @@
-import { Suspense } from "react";
-import { MesAMesView } from "@/components/mes-a-mes";
-import { LoadingBlock, PageHeader, PageStack } from "@/components/ui";
+import { RedirectTo } from "@/components/redirect-to";
 
+/** Mes a mes ahora es Movimientos > Por mes. */
 export default function Page() {
-  return (
-    <Suspense fallback={<LoadingBlock label="Cargando mes a mes…" />}>
-      <PageStack>
-        <PageHeader
-          eyebrow="Gastos"
-          title="Mes a mes"
-          description="Totales del mes, por categoría."
-        />
-        <MesAMesView mode="resumen" />
-      </PageStack>
-    </Suspense>
-  );
+  return <RedirectTo href="/consumos?tab=resumen" />;
 }

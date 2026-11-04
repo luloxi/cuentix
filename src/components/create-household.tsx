@@ -64,8 +64,8 @@ export function CreateHouseholdButton({ className, variant = "pill" }: Props) {
         }}
         className={cn(
           variant === "pill"
-            ? "inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-semibold text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
-            : "inline-flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]",
+            ? "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 py-1 text-[13px] font-semibold text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+            : "inline-flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]",
           className,
         )}
       >

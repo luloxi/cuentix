@@ -15,6 +15,16 @@ export function formatArs(value: number | null | undefined): string {
   }).format(value);
 }
 
+/** Pesos sin centavos: para lo que se lee de un vistazo. */
+export function formatPesos(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(Math.round(value));
+}
+
 /**
  * Dólares — never bare "$" alone (confusable with pesos).
  * Shows "USD 24,00" so it's obvious on mobile.

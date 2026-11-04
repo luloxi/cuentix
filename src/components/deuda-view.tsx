@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isAbortError } from "@/hooks/use-json-resource";
 import { useRouter, useSearchParams } from "next/navigation";
+import { SectionNav } from "@/components/section-nav";
 import { cn, formatArs, formatUsd, formatDateAr } from "@/lib/utils";
 import {
   FieldLabel,
@@ -380,6 +381,11 @@ export function DeudaView() {
 
   return (
     <div className="space-y-3">
+      <div>
+        <h1 className="text-[1.6rem] font-semibold leading-tight tracking-tight">Deuda</h1>
+        <p className="mt-1 text-[15px] text-[var(--muted-fg)]">Tu tarjeta y lo que falta pagar.</p>
+      </div>
+      <SectionNav section="patrimonio" />
       <Surface className="space-y-3 !p-4">
         <div>
           <h2 className="text-sm font-semibold tracking-tight">

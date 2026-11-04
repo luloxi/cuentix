@@ -287,7 +287,7 @@ export function CategoryLinesChart({
               key={c.slug}
               type="button"
               onClick={() => toggle(c.slug)}
-              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] transition md:min-h-9"
               style={{
                 borderColor: on ? color : undefined,
                 backgroundColor: on ? `${color}18` : undefined,

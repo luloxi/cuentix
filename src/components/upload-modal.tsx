@@ -154,7 +154,7 @@ function UploadDialog({
               "flex h-14 w-14 items-center justify-center rounded-2xl shadow-md",
               loading
                 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950"
-                : "bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-600/30",
+                : "bg-[var(--accent)] text-[var(--on-accent)]",
             )}
           >
             {loading ? (

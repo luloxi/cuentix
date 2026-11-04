@@ -5,8 +5,10 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, Download, FileSpreadsheet, FileText, Search, SlidersHorizontal, X, List,
 } from "lucide-react";
 import * as XLSX from "xlsx";
-import { formatArs, cn, currentPeriodAr, periodFromDateString } from "@/lib/utils";
-import { formatPeriodLabel } from "@/lib/period-label";
+import { formatArs, formatPesos, formatUsd, cn, currentPeriodAr, periodFromDateString } from "@/lib/utils";
+import { CategoryIcon } from "@/lib/category-icons";
+import { colorForCategory } from "@/lib/category-colors";
+import { formatPeriodLabel, formatPeriodTitle } from "@/lib/period-label";
 import { isAbortError } from "@/hooks/use-json-resource";
 import { nextPage } from "@/lib/list-page";
 import { EmptyState, ListSkeleton, Toast } from "@/components/ui";
@@ -67,6 +69,15 @@ const PRODUCT_SUBCATS = [
 ];
 const PAGE_SIZES = [5, 10, 25, 50] as const;
 
+const SHORT_MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+/** "2026-11-04" → "4 nov". Sin año: el mes ya está arriba. */
+function shortDate(date: string): string {
+  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return date;
+  return `${Number(m[3])} ${SHORT_MONTHS[Number(m[2]) - 1] ?? m[2]}`;
+}
+
 function memberLabel(m: Member) {
   const n = m.name.trim();
   return n ? (n.split(/\s+/)[0] ?? n) : "Sin nombre";
@@ -97,8 +108,8 @@ function IogBadge({ size = "md" }: { size?: "sm" | "md" }) {
     <span
       className={
         size === "sm"
-          ? "shrink-0 rounded-full bg-amber-600/90 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white dark:bg-amber-300 dark:text-amber-950"
-          : "shrink-0 rounded-full bg-amber-600/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white dark:bg-amber-300 dark:text-amber-950"
+          ? "shrink-0 rounded-full bg-[var(--warn)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--on-accent)]"
+          : "shrink-0 rounded-full bg-[var(--warn)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--on-accent)]"
       }
       title="Vinculado a Invoice IOG — no cuenta en la neta"
     >
@@ -252,6 +263,7 @@ export function TransactionsTable() {
   const [cubiertoBusy, setCubiertoBusy] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
@@ -881,7 +893,7 @@ export function TransactionsTable() {
     }
   }
 
-  function AssignSelect({ r }: { r: Tx }) {
+  function AssignSelect({ r, full = false }: { r: Tx; full?: boolean }) {
     const value = assignValueFor(r);
     const opts =
       households.length > 0
@@ -895,7 +907,7 @@ export function TransactionsTable() {
         disabled={savingId === r.id}
         onChange={(e) => void onAssignChange(r, e.target.value)}
         className={cn(
-          "lc-input !px-2 !py-1.5 text-xs font-medium",
+          full ? "lc-input w-full font-medium" : "lc-input !px-2 !py-1.5 text-xs font-medium",
           value === "reintegro"
             ? "border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
             : value === "cubierto"
@@ -982,7 +994,7 @@ export function TransactionsTable() {
         >
           <option value="">Todos los meses</option>
           {periods.map((p) => (
-            <option key={p} value={p}>{formatPeriodLabel(p)}</option>
+            <option key={p} value={p}>{formatPeriodTitle(p)}</option>
           ))}
         </select>
 
@@ -991,15 +1003,14 @@ export function TransactionsTable() {
             type="button"
             onClick={() => { setExportOpen((o) => !o); setFilterOpen(false); }}
             disabled={!sorted.length}
-            className="lc-btn lc-btn-secondary !px-2.5 disabled:opacity-40"
+            className="lc-btn lc-btn-secondary !min-h-11 !w-11 !rounded-full !px-0 disabled:opacity-40"
             aria-label="Descargar"
             aria-expanded={exportOpen}
           >
-            <Download className="h-4 w-4" />
-            <ChevronDown className={cn("h-3.5 w-3.5 transition", exportOpen && "rotate-180")} />
+            <Download className="h-[18px] w-[18px]" />
           </button>
           {exportOpen && (
-            <div className="absolute left-0 z-30 mt-1.5 w-64 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950">
+            <div className="absolute right-0 z-30 mt-1.5 w-[min(16rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--card-shadow-lg)]">
               <p className="border-b border-zinc-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:border-zinc-800">
                 Exportar listado filtrado
               </p>
@@ -1026,25 +1037,24 @@ export function TransactionsTable() {
             type="button"
             onClick={() => { setFilterOpen((o) => !o); setExportOpen(false); }}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition",
+              "relative inline-flex min-h-11 w-11 items-center justify-center rounded-full border transition",
               activeFilterCount > 0 || filterOpen
-                ? "border-[var(--brand)]/40 bg-[var(--brand-soft)] text-[var(--brand-fg)]"
-                : "border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-muted)]",
+                ? "border-[var(--brand)]/50 bg-[var(--brand-soft)] text-[var(--foreground)]"
+                : "border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--surface-muted)]",
             )}
             aria-expanded={filterOpen}
-            aria-label="Filtros"
+            aria-label={activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : "Filtros"}
           >
-            <SlidersHorizontal className="h-4 w-4" />
-            Filtros
+            <SlidersHorizontal className="h-[18px] w-[18px]" />
             {activeFilterCount > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--brand)] px-1.5 text-[10px] font-bold text-white dark:text-[#121110]">
+              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--brand)] px-1 text-[11px] font-bold text-[var(--on-accent)]">
                 {activeFilterCount}
               </span>
             )}
           </button>
 
           {filterOpen && (
-            <div className="absolute right-0 z-30 mt-1.5 w-[min(100vw-1.5rem,20rem)] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950">
+            <div className="absolute right-0 z-30 mt-1.5 max-h-[70dvh] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--card-shadow-lg)]">
               <div className="flex items-center justify-between border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Filtros</p>
                 {activeFilterCount > 0 && (
@@ -1169,7 +1179,7 @@ export function TransactionsTable() {
             onClick={() => setIogOnly((v) => !v)}
             className={
               iogOnly
-                ? "shrink-0 rounded-full bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white dark:bg-amber-300 dark:text-amber-950"
+                ? "shrink-0 rounded-full bg-[var(--warn)] px-2.5 py-1 text-[11px] font-semibold text-[var(--on-accent)]"
                 : "shrink-0 rounded-full border border-amber-300/80 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-100 dark:hover:bg-amber-900/50"
             }
             aria-pressed={iogOnly}
@@ -1254,21 +1264,65 @@ export function TransactionsTable() {
         />
       ) : (
         <>
-          <ul className="space-y-2 md:hidden">
+          <ul className="space-y-2.5 md:hidden">
             {pageRows.map((r) => {
               const isTicket = r.hasTicket;
               const isOpen = expanded.has(r.id);
+              const isEditing = editingId === r.id;
+              const slug = r.category?.slug ?? "uncategorized";
+              const color = colorForCategory(slug);
+              const amountMain =
+                r.amountArs != null
+                  ? formatPesos(r.amountArs)
+                  : r.amountUsd != null
+                    ? formatUsd(r.amountUsd)
+                    : "Sin monto";
+              const amountSub = r.amountArs != null && r.amountUsd != null ? formatUsd(r.amountUsd) : null;
               return (
-                <li key={r.id} className={cn("rounded-2xl border p-3.5", isTicket ? "lc-ticket" : "border-[var(--border)] bg-[var(--surface)]")}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <span className="truncate text-sm font-semibold">{r.descriptionNormalized}</span>
+                <li
+                  key={r.id}
+                  className={cn(
+                    "overflow-hidden rounded-[1.25rem] border shadow-[var(--card-shadow)]",
+                    isTicket ? "lc-ticket" : "border-[var(--border)] bg-[var(--surface)]",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(isEditing ? null : r.id)}
+                    aria-expanded={isEditing}
+                    aria-label={`${r.descriptionNormalized}, ${amountMain}. ${isEditing ? "Cerrar" : "Editar"}`}
+                    className="flex min-h-[3.75rem] w-full cursor-pointer items-center gap-3 px-4 py-3 text-left"
+                  >
+                    <span
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl"
+                      style={{ backgroundColor: `${color}26`, color }}
+                    >
+                      <CategoryIcon slug={slug} size={18} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[15px] font-semibold">{r.descriptionNormalized}</span>
                         {r.revisar ? <RevisarBadge size="sm" /> : null}
-                        {isTicket && <span className="shrink-0 rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white dark:bg-violet-300 dark:text-violet-950">Ticket</span>}
                         {r.linkedToInvoiceIog && <IogBadge size="sm" />}
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                      </span>
+                      <span className="block truncate text-[13px] text-[var(--muted-fg)]">
+                        {shortDate(r.date)} · {categoryLabel(r.category?.name) || "Sin categoría"}
+                        {r.ownership === "shared" ? " · Hogar" : ""}
+                        {r.installment ? ` · cuota ${r.installment}` : ""}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="block text-[15px] font-semibold tabular-nums">{amountMain}</span>
+                      {amountSub && (
+                        <span className="block text-[12px] tabular-nums text-[var(--muted-fg)]">{amountSub}</span>
+                      )}
+                    </span>
+                  </button>
+
+                  {isEditing && (
+                    <div className="space-y-3 border-t border-[var(--border)] px-4 pb-4 pt-3">
+                      <label className="block">
+                        <span className="mb-1 block text-[13px] font-medium text-[var(--muted-fg)]">Fecha</span>
                         <input
                           type="date"
                           defaultValue={r.date}
@@ -1277,104 +1331,122 @@ export function TransactionsTable() {
                             const v = e.target.value;
                             if (v && v !== r.date) void patch(r.id, { date: v });
                           }}
-                          className="lc-input !w-auto !px-1.5 !py-0.5 text-xs"
-                          aria-label="Fecha"
+                          className="lc-input w-full"
                         />
-                        {r.installment ? <span>· cuota {r.installment}</span> : null}
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="block min-w-0">
+                          <span className="mb-1 block text-[13px] font-medium text-[var(--muted-fg)]">Monto en pesos</span>
+                          <input
+                            key={`${r.id}-ars-${r.amountArs ?? "∅"}`}
+                            type="number"
+                            step="0.01"
+                            inputMode="decimal"
+                            defaultValue={r.amountArs ?? ""}
+                            placeholder={hasAnyAmount(r) ? undefined : "sin monto"}
+                            disabled={savingId === r.id}
+                            onBlur={(e) => {
+                              const next = nextAmountOnBlur(e.target.value, r.amountArs, r.amountUsd);
+                              if (next === undefined) return;
+                              if (next !== r.amountArs) void patch(r.id, { amountArs: next });
+                            }}
+                            className="lc-input w-full text-right tabular-nums"
+                            aria-label="Monto en pesos"
+                          />
+                        </label>
+                        <label className="block min-w-0">
+                          <span className="mb-1 block text-[13px] font-medium text-[var(--muted-fg)]">Monto en dólares</span>
+                          <input
+                            key={`${r.id}-usd-${r.amountUsd ?? "∅"}`}
+                            type="number"
+                            step="0.01"
+                            inputMode="decimal"
+                            defaultValue={r.amountUsd ?? ""}
+                            placeholder={hasAnyAmount(r) ? undefined : "sin monto"}
+                            disabled={savingId === r.id}
+                            onBlur={(e) => {
+                              const next = nextAmountOnBlur(e.target.value, r.amountUsd, r.amountArs);
+                              if (next === undefined) return;
+                              if (next !== r.amountUsd) void patch(r.id, { amountUsd: next });
+                            }}
+                            className="lc-input w-full text-right tabular-nums"
+                            aria-label="Monto en dólares"
+                          />
+                        </label>
                       </div>
-                    </div>
-                    <div className="shrink-0 space-y-1 text-right">
-                      {r.linkedToInvoiceIog && (
-                        <div className="mb-0.5 flex justify-end">
-                          <IogBadge size="sm" />
+                      <div>
+                        <span className="mb-1 block text-[13px] font-medium text-[var(--muted-fg)]">Categoría</span>
+                        {isTicket ? (
+                          <span className="inline-flex min-h-11 items-center rounded-2xl bg-[color-mix(in_srgb,var(--a2)_22%,var(--surface))] px-3 text-sm font-medium">
+                            {categoryLabel(r.category?.name) || "Supermercado"}
+                          </span>
+                        ) : (
+                          <select
+                            value={r.category?.id ?? ""}
+                            disabled={savingId === r.id}
+                            onChange={(e) => void patch(r.id, { categoryId: e.target.value || null })}
+                            className="lc-input w-full"
+                            aria-label="Categoría"
+                          >
+                            {categories.map((c) => (
+                              <option key={c.id} value={c.id}>{categoryLabel(c.name)}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-[13px] font-medium text-[var(--muted-fg)]">De quién es</span>
+                        <AssignSelect r={r} full />
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-[13px] font-medium text-[var(--muted-fg)]">Quién pagó</span>
+                        <select
+                          value={r.paidByUserId ?? members[0]?.userId ?? ""}
+                          disabled={savingId === r.id || !members.length}
+                          onChange={(e) => void patch(r.id, { paidByUserId: e.target.value || null })}
+                          className="lc-input w-full"
+                          aria-label="Quién pagó"
+                        >
+                          {members.map((m) => (
+                            <option key={m.userId} value={m.userId}>{memberLabel(m)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <BusinessSyncToggle
+                        isBusiness={Boolean(r.isBusiness)}
+                        syncStatus={r.syncStatus ?? null}
+                        canMark={r.ownership === "personal" && !r.isPayment}
+                        disabled={savingId === r.id}
+                        onToggle={() => void patch(r.id, { isBusiness: !r.isBusiness })}
+                      />
+                      {isTicket && (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(r.id)}
+                          className="lc-btn lc-btn-secondary w-full"
+                        >
+                          {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          {isOpen ? "Ocultar ítems del ticket" : "Ver ítems del ticket"}
+                        </button>
+                      )}
+                      {isTicket && isOpen && r.receipt && (
+                        <div className="space-y-2 border-t border-[var(--border)] pt-3">
+                          {r.receipt.items.length === 0 ? (
+                            <p className="text-sm text-[var(--muted-fg)]">Sin ítems leídos.</p>
+                          ) : r.receipt.items.map((item) => (
+                            <div key={item.id} className="space-y-2 rounded-2xl bg-[var(--surface-muted)] p-2.5">
+                              <input defaultValue={item.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== item.name) void patchItem(r.id, item.id, { name: v }); }} className="lc-input w-full" aria-label="Nombre del ítem" />
+                              <div className="flex items-center gap-2">
+                                <select value={item.productCategory ?? ""} onChange={(e) => void patchItem(r.id, item.id, { productCategory: e.target.value || null })} className="lc-input min-w-0 flex-1" aria-label="Subcategoría">
+                                  <option value="">Subcategoría…</option>
+                                  {PRODUCT_SUBCATS.map((sub) => <option key={sub} value={sub}>{sub}</option>)}
+                                </select>
+                                <span className="shrink-0 text-sm tabular-nums text-[var(--muted-fg)]">{item.quantity && item.quantity !== 1 ? `${item.quantity}× ` : ""}{formatArs(item.lineTotal)}</span>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
-                      <label className="flex items-center justify-end gap-1">
-                        <span className="text-[10px] font-medium text-zinc-400">$</span>
-                        <input
-                          key={`${r.id}-ars-${r.amountArs ?? "∅"}`}
-                          type="number"
-                          step="0.01"
-                          inputMode="decimal"
-                          defaultValue={r.amountArs ?? ""}
-                          placeholder={hasAnyAmount(r) ? undefined : "sin monto"}
-                          disabled={savingId === r.id}
-                          onBlur={(e) => {
-                            const next = nextAmountOnBlur(e.target.value, r.amountArs, r.amountUsd);
-                            if (next === undefined) return;
-                            if (next !== r.amountArs) void patch(r.id, { amountArs: next });
-                          }}
-                          className="lc-input w-[7.5rem] !px-1.5 !py-0.5 text-right text-sm font-semibold tabular-nums placeholder:text-[10px] placeholder:font-normal placeholder:text-zinc-400"
-                          aria-label="Monto en pesos"
-                        />
-                      </label>
-                      <label className="flex items-center justify-end gap-1">
-                        <span className="text-[10px] font-medium text-zinc-400">USD</span>
-                        <input
-                          key={`${r.id}-usd-${r.amountUsd ?? "∅"}`}
-                          type="number"
-                          step="0.01"
-                          inputMode="decimal"
-                          defaultValue={r.amountUsd ?? ""}
-                          placeholder={hasAnyAmount(r) ? undefined : "sin monto"}
-                          disabled={savingId === r.id}
-                          onBlur={(e) => {
-                            const next = nextAmountOnBlur(e.target.value, r.amountUsd, r.amountArs);
-                            if (next === undefined) return;
-                            if (next !== r.amountUsd) void patch(r.id, { amountUsd: next });
-                          }}
-                          className="lc-input w-[7.5rem] !px-1.5 !py-0.5 text-right text-xs tabular-nums text-zinc-600 placeholder:text-[10px] placeholder:font-normal placeholder:text-zinc-400"
-                          aria-label="Monto en dólares"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {isTicket ? (
-                      <span className="inline-flex items-center rounded-lg bg-violet-100 px-2 py-1.5 text-xs font-medium text-violet-900 dark:bg-violet-900/50 dark:text-violet-100">{categoryLabel(r.category?.name) || "Supermercado"}</span>
-                    ) : (
-                      <select value={r.category?.id ?? ""} disabled={savingId === r.id} onChange={(e) => void patch(r.id, { categoryId: e.target.value || null })} className="lc-input !px-2 !py-1.5 text-xs">
-                        {categories.map((c) => <option key={c.id} value={c.id}>{categoryLabel(c.name)}</option>)}
-                      </select>
-                    )}
-                    <AssignSelect r={r} />
-                  </div>
-                  <div className="mt-2">
-                    <select value={r.paidByUserId ?? members[0]?.userId ?? ""} disabled={savingId === r.id || !members.length} onChange={(e) => void patch(r.id, { paidByUserId: e.target.value || null })} className="lc-input w-full !px-2 !py-1.5 text-xs">
-                      {members.map((m) => <option key={m.userId} value={m.userId}>{memberLabel(m)}</option>)}
-                    </select>
-                  </div>
-                  <div className="mt-2">
-                    <BusinessSyncToggle
-                      isBusiness={Boolean(r.isBusiness)}
-                      syncStatus={r.syncStatus ?? null}
-                      canMark={r.ownership === "personal" && !r.isPayment}
-                      disabled={savingId === r.id}
-                      onToggle={() => void patch(r.id, { isBusiness: !r.isBusiness })}
-                    />
-                  </div>
-                  {isTicket && (
-                    <button type="button" onClick={() => toggleExpand(r.id)} className="mt-2 flex w-full items-center justify-center gap-1 py-1.5 text-xs font-medium text-violet-700 dark:text-violet-300">
-                      {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                      {isOpen ? "Ocultar ítems" : "Ver ítems"}
-                    </button>
-                  )}
-                  {isTicket && isOpen && r.receipt && (
-                    <div className="mt-2 space-y-2 border-t border-violet-200/80 pt-2 dark:border-violet-900">
-                      {r.receipt.items.length === 0 ? (
-                        <p className="text-xs text-zinc-500">Sin ítems leídos.</p>
-                      ) : r.receipt.items.map((item) => (
-                        <div key={item.id} className="space-y-1.5 rounded-lg bg-white/80 p-2 dark:bg-zinc-900/60">
-                          <input defaultValue={item.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== item.name) void patchItem(r.id, item.id, { name: v }); }} className="w-full rounded-md border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900" />
-                          <div className="flex items-center gap-2">
-                            <select value={item.productCategory ?? ""} onChange={(e) => void patchItem(r.id, item.id, { productCategory: e.target.value || null })} className="min-w-0 flex-1 rounded-md border border-zinc-200 px-2 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-900">
-                              <option value="">Subcategoría…</option>
-                              {PRODUCT_SUBCATS.map((s) => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                            <span className="shrink-0 text-xs tabular-nums text-zinc-600">{item.quantity && item.quantity !== 1 ? `${item.quantity}× ` : ""}{formatArs(item.lineTotal)}</span>
-                          </div>
-                        </div>
-                      ))}
                     </div>
                   )}
                 </li>
@@ -1427,7 +1499,7 @@ export function TransactionsTable() {
                           <div className="flex min-w-0 items-center gap-1.5">
                             <span className="truncate font-medium">{r.descriptionNormalized}</span>
                             {r.revisar ? <RevisarBadge /> : null}
-                            {isTicket && <span className="shrink-0 rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-semibold uppercase text-white dark:bg-violet-300 dark:text-violet-950">Ticket</span>}
+                            {isTicket && <span className="shrink-0 rounded-full bg-[var(--a2)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--on-accent)]">Ticket</span>}
                             {r.linkedToInvoiceIog && <IogBadge />}
                           </div>
                           {r.installment && <div className="text-xs text-zinc-500">cuota {r.installment}</div>}
@@ -1547,11 +1619,11 @@ export function TransactionsTable() {
               </label>
             </div>
             <div className="flex items-center gap-1">
-              <button type="button" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="lc-btn lc-btn-secondary !px-2.5 disabled:opacity-40" aria-label="Anterior">
+              <button type="button" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="lc-btn lc-btn-secondary !min-w-11 !px-2.5 disabled:opacity-40" aria-label="Anterior">
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="min-w-[4.5rem] text-center tabular-nums text-zinc-600 dark:text-zinc-400">{safePage} / {totalPages}</span>
-              <button type="button" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} className="lc-btn lc-btn-secondary !px-2.5 disabled:opacity-40" aria-label="Siguiente">
+              <button type="button" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} className="lc-btn lc-btn-secondary !min-w-11 !px-2.5 disabled:opacity-40" aria-label="Siguiente">
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>

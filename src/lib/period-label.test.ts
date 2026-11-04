@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  formatPeriodTitle,
   isYearMonth,
   periodSelectOptions,
   recentPeriods,
@@ -25,5 +26,13 @@ describe("selectedPeriod", () => {
       "2026-01",
       "2024-12",
     ]);
+  });
+});
+
+describe("formatPeriodTitle", () => {
+  it("writes month and year without the 'de'", () => {
+    assert.equal(formatPeriodTitle("2026-11"), "Noviembre 2026");
+    assert.equal(formatPeriodTitle("2026-01"), "Enero 2026");
+    assert.equal(formatPeriodTitle("nope"), "nope");
   });
 });

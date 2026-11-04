@@ -135,7 +135,7 @@ function ChoiceRow({
         className={cn(
           "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition",
           primary
-            ? "bg-[var(--brand)] text-white dark:text-[#121110]"
+            ? "bg-[var(--brand)] text-[var(--on-accent)]"
             : "bg-[var(--surface-muted)] text-[var(--foreground)] group-hover:bg-[var(--surface)]",
         )}
       >

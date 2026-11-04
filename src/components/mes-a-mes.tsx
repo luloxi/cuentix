@@ -1190,13 +1190,13 @@ function TotalRow({
     <div
       className={cn(
         "flex items-center justify-between gap-3 rounded-xl px-3 py-2.5",
-        tone === "pesos" && "bg-sky-500 text-white shadow-sm shadow-sky-500/25",
+        tone === "pesos" && "bg-[var(--sky)] text-[var(--on-accent)]",
         tone === "dolares" &&
-          "bg-emerald-600 text-white shadow-sm shadow-emerald-600/25",
+          "bg-[var(--ok)] text-[var(--on-accent)]",
         tone === "neto" &&
-          "bg-gradient-to-r from-amber-500 to-yellow-500 text-amber-950 shadow-sm shadow-amber-500/30",
+          "bg-[var(--warn)] text-[var(--on-accent)]",
         tone === "cubierto" &&
-          "bg-violet-600/90 text-white shadow-sm shadow-violet-600/25",
+          "bg-[var(--a2)] text-[var(--on-accent)]",
       )}
     >
       <span className="min-w-0">

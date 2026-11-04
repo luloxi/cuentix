@@ -28,11 +28,11 @@ export function PageHeader({
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
         {eyebrow && (
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--brand-fg)]">
+          <p className="text-[13px] font-semibold text-[var(--muted-fg)]">
             {eyebrow}
           </p>
         )}
-        <h1 className="mt-0.5 text-[1.65rem] font-semibold tracking-tight text-[var(--foreground)]">
+        <h1 className="mt-0.5 text-[1.6rem] font-semibold leading-tight tracking-tight text-[var(--foreground)]">
           {title}
         </h1>
         {description && (
@@ -124,25 +124,25 @@ export function StatTile({
     brand:
       "border-[var(--border)] bg-[var(--brand-soft)]",
     danger:
-      "border-red-200/80 bg-red-50/50 dark:border-red-900/50 dark:bg-red-950/30",
+      "border-[color-mix(in_srgb,var(--err)_50%,var(--border))] bg-[color-mix(in_srgb,var(--err)_12%,var(--surface))]",
     violet:
-      "border-violet-200/80 bg-violet-50/50 dark:border-violet-900/40 dark:bg-violet-950/30",
+      "border-[color-mix(in_srgb,var(--a2)_50%,var(--border))] bg-[color-mix(in_srgb,var(--a2)_12%,var(--surface))]",
     amber:
-      "border-amber-200/80 bg-amber-50/50 dark:border-amber-900/40 dark:bg-amber-950/25",
+      "border-[color-mix(in_srgb,var(--warn)_60%,var(--border))] bg-[color-mix(in_srgb,var(--warn)_14%,var(--surface))]",
   } as const;
 
   const valueTone = {
     neutral: "text-[var(--foreground)]",
     brand: "text-[var(--brand-fg)]",
-    danger: "text-red-800 dark:text-red-200",
-    violet: "text-violet-950 dark:text-violet-100",
-    amber: "text-amber-950 dark:text-amber-100",
+    danger: "text-[var(--err-text)]",
+    violet: "text-[var(--foreground)]",
+    amber: "text-[var(--foreground)]",
   } as const;
 
   return (
-    <div className={cn("rounded-2xl border p-4", tones[tone])}>
+    <div className={cn("rounded-[1.25rem] border p-4 shadow-[var(--card-shadow)]", tones[tone])}>
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-fg)]">
+        <p className="text-[13px] font-semibold text-[var(--muted-fg)]">
           {label}
         </p>
         {icon && (
@@ -151,7 +151,7 @@ export function StatTile({
           </div>
         )}
       </div>
-      <p className={cn("mt-1.5 text-xl font-bold tabular-nums tracking-tight", valueTone[tone])}>
+      <p className={cn("mt-1.5 text-xl font-semibold tabular-nums tracking-tight", valueTone[tone])}>
         {value}
       </p>
       {hint && <p className="mt-1 text-xs text-[var(--muted-fg)]">{hint}</p>}
@@ -173,7 +173,7 @@ export function EmptyState({
   return (
     <div className="lc-card flex flex-col items-center px-6 py-14 text-center">
       {icon && (
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--warm-soft)] text-[var(--warm)]">
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--surface-muted)] text-[var(--muted-fg)]">
           {icon}
         </div>
       )}
@@ -203,33 +203,22 @@ export function LoadingBlock({ label = "Cargando…" }: { label?: string }) {
   );
 }
 
-/** Home: wide hero + grid of cards (mirrors dashboard layout). */
+/** Resumen: tres bloques grandes y una lista corta. */
 export function DashboardSkeleton() {
   return (
     <div
-      className="mx-auto flex w-full max-w-lg flex-col gap-3 md:max-w-5xl md:gap-4"
+      className="mx-auto flex w-full max-w-xl flex-col gap-4"
       role="status"
       aria-live="polite"
-      aria-label="Cargando inicio"
+      aria-label="Cargando resumen"
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-2">
-          <div className="skeleton h-4 w-28" />
-          <div className="skeleton h-3 w-20" />
-        </div>
-        <div className="flex gap-1.5">
-          <div className="skeleton h-8 w-8 !rounded-full" />
-          <div className="skeleton h-8 w-8 !rounded-full" />
-        </div>
+      <div className="skeleton h-5 w-40" />
+      <div className="skeleton h-36 w-full !rounded-[1.5rem]" />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="skeleton h-32 w-full !rounded-[1.5rem]" />
+        <div className="skeleton h-32 w-full !rounded-[1.5rem]" />
       </div>
-      <div className="skeleton h-48 w-full !rounded-[1.25rem] md:h-56" />
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
-        <div className="skeleton h-28 w-full !rounded-2xl" />
-        <div className="skeleton h-28 w-full !rounded-2xl" />
-        <div className="skeleton h-24 w-full !rounded-2xl" />
-        <div className="skeleton h-24 w-full !rounded-2xl" />
-        <div className="skeleton h-16 w-full !rounded-2xl md:col-span-2" />
-      </div>
+      <div className="skeleton h-28 w-full !rounded-[1.5rem]" />
     </div>
   );
 }
@@ -251,7 +240,7 @@ export function ListSkeleton({
       {Array.from({ length: rows }).map((_, i) => (
         <div
           key={i}
-          className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"
+          className="flex items-center gap-3 rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"
         >
           <div className="skeleton h-9 w-9 shrink-0 !rounded-xl" />
           <div className="min-w-0 flex-1 space-y-2">
@@ -281,7 +270,7 @@ export function HogarSkeleton({ label = "Cargando hogar…" }: { label?: string 
       {Array.from({ length: 5 }).map((_, i) => (
         <div
           key={i}
-          className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"
+          className="flex items-center gap-3 rounded-[1.25rem] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3"
         >
           <div className="skeleton h-8 w-8 shrink-0 !rounded-lg" />
           <div className="min-w-0 flex-1 space-y-2">

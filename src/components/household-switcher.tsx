@@ -182,7 +182,7 @@ export function HouseholdSwitcher({ variant = "page", className }: Props) {
                 disabled={busy}
                 onClick={() => void switchTo(h.id)}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition",
+                  "inline-flex min-h-11 items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-sm font-semibold transition",
                   selected
                     ? "bg-[var(--brand-soft)] text-[var(--brand-fg)]"
                     : "text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]",
@@ -197,7 +197,7 @@ export function HouseholdSwitcher({ variant = "page", className }: Props) {
                   type="button"
                   disabled={busy}
                   onClick={() => void deleteHousehold(h.id, h.name)}
-                  className="ml-0.5 rounded-lg p-1.5 text-zinc-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                  className="ml-0.5 inline-flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                   aria-label={`Eliminar ${h.name}`}
                   title="Eliminar hogar"
                 >

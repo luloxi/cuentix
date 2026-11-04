@@ -1,19 +1,41 @@
 /**
- * App nav. Every working read-only section is listed.
- * Suscripción, Importar, Cargas and Compartir stay off the bar
- * (those routes redirect or are the share target). Deuda stays off too.
- * Administración is added only for admins.
+ * Navegación de Tarask (rediseño 2026-11).
+ *
+ * Barra de abajo (4 pestañas + Más):
+ *   Resumen · Movimientos · Patrimonio · Hogar · Más
+ * Lo demás vive un nivel más adentro, como chips dentro de cada pestaña
+ * (`SECTION_TABS`). Ninguna ruta vieja desapareció: /ingresos, /ahorros, /deuda,
+ * /grupo, /supermercado, /categorias y /mcp siguen existiendo.
+ * /analisis y /mes-a-mes ya no son pantallas aparte: abren Movimientos > Gráficos / Por mes.
  */
-export const NAV_LINKS = [
-  { href: "/dashboard", label: "Inicio" },
-  { href: "/consumos", label: "Consumos" },
-  { href: "/ingresos", label: "Ingresos" },
-  { href: "/compartido", label: "Hogar" },
-  { href: "/analisis", label: "Análisis" },
-  { href: "/mes-a-mes", label: "Mes a mes" },
-  { href: "/grupo", label: "Grupo" },
-  { href: "/supermercado", label: "Supermercado" },
-  { href: "/mcp", label: "MCP" },
+
+export const MAIN_TABS = [
+  {
+    href: "/dashboard",
+    label: "Resumen",
+    match: ["/dashboard"],
+  },
+  {
+    href: "/consumos",
+    label: "Movimientos",
+    match: ["/consumos", "/ingresos", "/mes-a-mes", "/analisis"],
+  },
+  {
+    href: "/patrimonio",
+    label: "Patrimonio",
+    match: ["/patrimonio", "/ahorros", "/deuda"],
+  },
+  {
+    href: "/compartido",
+    label: "Hogar",
+    match: ["/compartido", "/grupo", "/pareja", "/supermercado"],
+  },
+] as const;
+
+/** Debajo de "Más". Categorías y MCP no estaban en la barra principal de gastos. */
+export const MORE_LINKS = [
+  { href: "/categorias", label: "Categorías" },
+  { href: "/mcp", label: "Conectar con IA" },
 ] as const;
 
 export const ADMIN_NAV_LINK = {
@@ -21,61 +43,98 @@ export const ADMIN_NAV_LINK = {
   label: "Administración",
 } as const;
 
-/** Mobile bar slots before the overflow control. The rest go under Más. */
-export const MOBILE_NAV_BAR_COUNT = 4;
+export type MainTabHref = (typeof MAIN_TABS)[number]["href"];
+export type MoreHref = (typeof MORE_LINKS)[number]["href"] | typeof ADMIN_NAV_LINK.href;
+export type NavLink = { href: string; label: string };
 
-export type PublicNavHref = (typeof NAV_LINKS)[number]["href"];
-export type NavHref = PublicNavHref | typeof ADMIN_NAV_LINK.href;
+export function moreLinksFor(isAdmin: boolean): readonly NavLink[] {
+  const links: NavLink[] = MORE_LINKS.map((l) => ({ href: l.href, label: l.label }));
+  if (isAdmin) links.push({ href: ADMIN_NAV_LINK.href, label: ADMIN_NAV_LINK.label });
+  return links;
+}
 
-export type NavLink = { href: NavHref; label: string };
+function normalize(pathname: string): string {
+  return pathname.replace(/\/$/, "") || "/";
+}
 
-export const NAV_HREFS: readonly PublicNavHref[] = NAV_LINKS.map((l) => l.href);
+function pathMatches(pathname: string, base: string): boolean {
+  const p = normalize(pathname);
+  return p === base || p.startsWith(`${base}/`);
+}
 
+/** Pestaña principal que contiene esta ruta, o null si es de "Más". */
+export function activeMainTab(pathname: string): MainTabHref | null {
+  for (const tab of MAIN_TABS) {
+    if (tab.match.some((base) => pathMatches(pathname, base))) return tab.href;
+  }
+  return null;
+}
+
+export function isMoreActive(pathname: string): boolean {
+  return [...MORE_LINKS, ADMIN_NAV_LINK].some((l) => pathMatches(pathname, l.href));
+}
+
+export type SectionTab = {
+  id: string;
+  label: string;
+  href: string;
+  /** Ruta que la marca activa. Si hay `tab`, además tiene que coincidir ?tab=. */
+  path: string;
+  tab?: string;
+};
+
+export type SectionId = "movimientos" | "patrimonio" | "hogar";
+
+export const SECTION_TABS: Record<SectionId, readonly SectionTab[]> = {
+  movimientos: [
+    { id: "gastos", label: "Gastos", href: "/consumos?tab=lista", path: "/consumos", tab: "lista" },
+    { id: "ingresos", label: "Ingresos", href: "/ingresos", path: "/ingresos" },
+    { id: "por-mes", label: "Por mes", href: "/consumos?tab=resumen", path: "/consumos", tab: "resumen" },
+    { id: "graficos", label: "Gráficos", href: "/consumos?tab=charts", path: "/consumos", tab: "charts" },
+    { id: "fiwind", label: "Fiwind", href: "/consumos?tab=fiwind", path: "/consumos", tab: "fiwind" },
+  ],
+  patrimonio: [
+    { id: "evolucion", label: "Evolución", href: "/patrimonio", path: "/patrimonio" },
+    { id: "ahorros", label: "Ahorros", href: "/ahorros", path: "/ahorros" },
+    { id: "deuda", label: "Deuda", href: "/deuda", path: "/deuda" },
+  ],
+  hogar: [
+    { id: "hogar", label: "Gastos", href: "/compartido", path: "/compartido" },
+    { id: "grupo", label: "Grupo", href: "/grupo", path: "/grupo" },
+    { id: "super", label: "Supermercado", href: "/supermercado", path: "/supermercado" },
+  ],
+};
+
+/** Tab del chip activo. `tabParam` es el valor de ?tab= (o null). */
+export function activeSectionTab(
+  section: SectionId,
+  pathname: string,
+  tabParam: string | null,
+): string {
+  const tabs = SECTION_TABS[section];
+  const hit = tabs.find((t) => {
+    if (!pathMatches(pathname, t.path)) return false;
+    if (t.tab == null) return true;
+    const want = tabParam ?? tabs.find((x) => x.path === t.path)?.tab;
+    return want === t.tab;
+  });
+  return hit?.id ?? tabs[0]!.id;
+}
+
+/**
+ * Rutas que no aparecen en la navegación: se llega por enlace, o redirigen.
+ * (Suscripción, Importar y Cargas redirigen a Resumen.)
+ */
 const UNLISTED_HREFS = new Set([
   "/cargas",
   "/importar",
   "/suscripcion",
   "/share-target",
-  "/deuda",
 ]);
-
-export function navLinksFor(isAdmin: boolean): readonly NavLink[] {
-  const links: NavLink[] = NAV_LINKS.map((l) => ({
-    href: l.href,
-    label: l.label,
-  }));
-  if (isAdmin) {
-    links.push({ href: ADMIN_NAV_LINK.href, label: ADMIN_NAV_LINK.label });
-  }
-  return links;
-}
 
 /** True when the href is a section that must not appear in the nav. */
 export function isUnlistedNavHref(href: string): boolean {
-  return UNLISTED_HREFS.has(href) || href.startsWith("/deuda/");
-}
-
-/**
- * Mobile bottom bar. When there are more sections than fit, the first
- * `MOBILE_NAV_BAR_COUNT` stay in the bar and the rest go in Más.
- */
-export function splitMobileNav<T>(links: readonly T[]): {
-  bar: T[];
-  more: T[];
-} {
-  if (links.length <= MOBILE_NAV_BAR_COUNT) {
-    return { bar: [...links], more: [] };
-  }
-  return {
-    bar: [...links.slice(0, MOBILE_NAV_BAR_COUNT)],
-    more: [...links.slice(MOBILE_NAV_BAR_COUNT)],
-  };
-}
-
-export function navIncludesDeuda(
-  hrefs: readonly string[] = NAV_HREFS,
-): boolean {
-  return hrefs.some((h) => h === "/deuda" || h.startsWith("/deuda/"));
+  return UNLISTED_HREFS.has(href);
 }
 
 /** Home hero: read-only. Never an upload, billing, or add-expense link. */
@@ -84,5 +143,5 @@ export function homeNextAction(monthTxCount: number): {
   label: string;
 } {
   void monthTxCount;
-  return { href: "/consumos", label: "Ver consumos" };
+  return { href: "/consumos", label: "Ver movimientos" };
 }

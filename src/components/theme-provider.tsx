@@ -85,7 +85,7 @@ function applyResolved(resolved: ResolvedTheme) {
   // Keep iOS status bar / theme-color roughly in sync
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) {
-    meta.setAttribute("content", resolved === "dark" ? "#121110" : "#f7f6f3");
+    meta.setAttribute("content", resolved === "dark" ? "#0b0b12" : "#fbf8f4");
   }
 }
 

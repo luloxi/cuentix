@@ -32,7 +32,7 @@ export function ApplyCriterionToast({
             type="button"
             disabled={busy}
             onClick={onApply}
-            className="rounded-lg bg-[var(--brand)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-60"
+            className="rounded-lg bg-[var(--brand)] px-2.5 py-1 text-xs font-semibold text-[var(--on-accent)] disabled:opacity-60"
           >
             {busy ? "Aplicando…" : "Aplicar"}
           </button>

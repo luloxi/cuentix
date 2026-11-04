@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn, formatArs, formatUsd } from "@/lib/utils";
 import { LoadingBlock, PageStack, Surface } from "@/components/ui";
+import { SectionNav } from "@/components/section-nav";
 import { AddressInput } from "@/components/address-input";
 import { AddressDisplay } from "@/components/address-display";
 import type { EnsResolution } from "@/lib/ens";
@@ -68,7 +69,7 @@ function DebankLink({ address }: { address: string | null }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--brand-fg)] hover:underline"
+      className="inline-flex min-h-11 items-center gap-1 text-[13px] font-medium text-[var(--brand-fg)] hover:underline"
     >
       ver en DeBank
       <ExternalLink className="h-3 w-3" />
@@ -245,7 +246,7 @@ export function AhorrosView() {
     <PageStack className="!space-y-4">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">Ahorros</h1>
+          <h1 className="text-[1.6rem] font-semibold leading-tight tracking-tight">Ahorros</h1>
           <p className="text-xs text-[var(--muted-fg)]">
             Wallets y bancos · solo vos ves esto
           </p>
@@ -265,6 +266,8 @@ export function AhorrosView() {
           Actualizar
         </button>
       </div>
+
+      <SectionNav section="patrimonio" />
 
       {summary && (
         <Surface className="!p-4">

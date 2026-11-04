@@ -9,8 +9,9 @@ import {
   currentPeriodAr,
   cn,
 } from "@/lib/utils";
-import { formatPeriodLabel, formatPeriodShort } from "@/lib/period-label";
+import { formatPeriodLabel, formatPeriodTitle, formatPeriodShort } from "@/lib/period-label";
 import { HogarSkeleton, PageStack, SegmentedControl } from "@/components/ui";
+import { SectionNav } from "@/components/section-nav";
 import { HogarCharts } from "@/components/hogar-charts";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { CreateHouseholdButton } from "@/components/create-household";
@@ -312,6 +313,7 @@ export function CompartidoView() {
 
   return (
     <PageStack className="!space-y-4">
+      <SectionNav section="hogar" />
       <SegmentedControl
         value={viewTab}
         onChange={onViewTab}
@@ -341,7 +343,7 @@ export function CompartidoView() {
             <button
               type="button"
               onClick={() => setInviteOpen(true)}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-semibold text-[var(--brand-fg)] transition hover:bg-[var(--brand-soft)]"
+              className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3.5 py-1 text-[13px] font-semibold text-[var(--text)] transition hover:bg-[var(--brand-soft)]"
             >
               <UserPlus className="h-3.5 w-3.5" />
               Invitar
@@ -362,11 +364,11 @@ export function CompartidoView() {
                 <option value="all">Todos los meses</option>
                 {periods.map((p) => (
                   <option key={p} value={p}>
-                    {formatPeriodLabel(p)}
+                    {formatPeriodTitle(p)}
                   </option>
                 ))}
                 {period !== "all" && !periods.includes(period) && (
-                  <option value={period}>{formatPeriodLabel(period)}</option>
+                  <option value={period}>{formatPeriodTitle(period)}</option>
                 )}
               </select>
             </div>
@@ -592,7 +594,7 @@ export function CompartidoView() {
                                       <p className="text-sm font-medium leading-snug">
                                         {e.description}
                                         {e.hasTicket && (
-                                          <span className="ml-1.5 rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white dark:bg-violet-300 dark:text-violet-950">
+                                          <span className="ml-1.5 rounded-full bg-[var(--a2)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--on-accent)]">
                                             Ticket
                                           </span>
                                         )}
