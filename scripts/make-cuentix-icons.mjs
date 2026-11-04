@@ -1,11 +1,15 @@
 /**
- * Rasterize public/brand/cuentix-icon.v2.svg into the PWA icon set.
+ * Rasterize public/brand/cuentix-icon.v4.svg into the PWA icon set.
  *
  *   node scripts/make-cuentix-icons.mjs
  *
- * sharp is a devDependency (librsvg). Outputs are opaque black, no alpha.
- * The maskable PNG scales the mark so every ink pixel sits inside the
- * inner 66% circle (Android adaptive-icon safe zone) on a full-bleed field.
+ * sharp is a devDependency (librsvg). "any" and apple-touch outputs are
+ * opaque black, full-bleed, no alpha. The maskable PNG scales the mark so
+ * every ink pixel sits inside the inner 66% circle (Android adaptive-icon
+ * safe zone) on a full-bleed black field.
+ *
+ * The tab favicon is a separate tight crop (public/favicon-tab.v4.svg).
+ * Rasterize it with scripts/make-tab-favicon.py.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -13,20 +17,25 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const masterPath = path.join(root, "public/brand/cuentix-icon.v2.svg");
+const masterPath = path.join(root, "public/brand/cuentix-icon.v4.svg");
 const iconsDir = path.join(root, "public/icons");
 const SIZE = 512;
 const SAFE_DIAMETER = 0.66 * SIZE;
 
-async function raster(svg, size, { alpha = false } = {}) {
-  let image = sharp(svg, { density: 144 })
-    .resize(size, size, { fit: "fill" })
-    .flatten({ background: "#000000" });
-  // Next.js rejects an app/favicon.ico whose embedded PNGs are RGB.
-  // Opaque RGBA (alpha 255) stays visually solid and decodes.
-  if (alpha) image = image.ensureAlpha();
-  else image = image.removeAlpha();
-  return image.png().toBuffer();
+/** ~4× supersample of the 512-unit master, then Lanczos downsample. */
+function densityFor(outSize) {
+  return Math.max(72, Math.round(72 * ((outSize * 4) / SIZE)));
+}
+
+async function raster(svg, size) {
+  // Opaque plate. flatten covers any fringe; removeAlpha drops the channel
+  // so installers treat the icon as a solid black tile.
+  return sharp(svg, { density: densityFor(size) })
+    .resize(size, size, { fit: "fill", kernel: "lanczos3" })
+    .flatten({ background: "#000000" })
+    .removeAlpha()
+    .png()
+    .toBuffer();
 }
 
 function inkBounds(data, width, height, channels) {
@@ -70,8 +79,8 @@ function assertInsideSafeCircle(data, width, height, channels) {
 }
 
 async function maskable(svg) {
-  const full = await sharp(svg, { density: 144 })
-    .resize(SIZE, SIZE, { fit: "fill" })
+  const full = await sharp(svg, { density: densityFor(SIZE) })
+    .resize(SIZE, SIZE, { fit: "fill", kernel: "lanczos3" })
     .flatten({ background: "#000000" })
     .raw()
     .toBuffer({ resolveWithObject: true });
@@ -88,8 +97,8 @@ async function maskable(svg) {
   const scale = (SAFE_DIAMETER / 2 - 2) / halfDiag;
 
   const scaled = Math.round(SIZE * scale);
-  const scaledBuf = await sharp(svg, { density: 144 })
-    .resize(scaled, scaled, { fit: "fill" })
+  const scaledBuf = await sharp(svg, { density: densityFor(scaled) })
+    .resize(scaled, scaled, { fit: "fill", kernel: "lanczos3" })
     .flatten({ background: "#000000" })
     .png()
     .toBuffer();
@@ -120,6 +129,27 @@ async function maskable(svg) {
   return png;
 }
 
+async function assertOpaqueBlackPlate(buf, name, size) {
+  const meta = await sharp(buf).metadata();
+  if (meta.hasAlpha) throw new Error(`${name} still has an alpha channel`);
+  if (meta.width !== size || meta.height !== size) {
+    throw new Error(`${name} is ${meta.width}x${meta.height}, expected ${size}`);
+  }
+  const { data, info } = await sharp(buf).raw().toBuffer({ resolveWithObject: true });
+  const corners = [
+    [0, 0],
+    [size - 1, 0],
+    [0, size - 1],
+    [size - 1, size - 1],
+  ];
+  for (const [x, y] of corners) {
+    const i = (y * size + x) * info.channels;
+    if (data[i] !== 0 || data[i + 1] !== 0 || data[i + 2] !== 0) {
+      throw new Error(`${name} corner ${x},${y} is not opaque black`);
+    }
+  }
+}
+
 const svg = await readFile(masterPath);
 await mkdir(iconsDir, { recursive: true });
 
@@ -127,10 +157,17 @@ const icon512 = await raster(svg, 512);
 const icon192 = await raster(svg, 192);
 const apple = await raster(svg, 180);
 const mask = await maskable(svg);
-await writeFile(path.join(iconsDir, "icon-512.v2.png"), icon512);
-await writeFile(path.join(iconsDir, "icon-192.v2.png"), icon192);
-await writeFile(path.join(iconsDir, "icon-maskable-512.v2.png"), mask);
-await writeFile(path.join(iconsDir, "apple-touch-icon-180.v2.png"), apple);
-await writeFile(path.join(root, "public/favicon.v2.svg"), svg);
 
-console.log("wrote public/icons/*.v2.png , public/favicon.v2.svg (la pestaña usa scripts/make-tab-favicon.py: recortada, fondo transparente)");
+await assertOpaqueBlackPlate(icon512, "icon-512.v4.png", 512);
+await assertOpaqueBlackPlate(icon192, "icon-192.v4.png", 192);
+await assertOpaqueBlackPlate(apple, "apple-touch-icon-180.v4.png", 180);
+await assertOpaqueBlackPlate(mask, "icon-maskable-512.v4.png", 512);
+
+await writeFile(path.join(iconsDir, "icon-512.v4.png"), icon512);
+await writeFile(path.join(iconsDir, "icon-192.v4.png"), icon192);
+await writeFile(path.join(iconsDir, "icon-maskable-512.v4.png"), mask);
+await writeFile(path.join(iconsDir, "apple-touch-icon-180.v4.png"), apple);
+
+console.log(
+  "wrote public/icons/icon-{192,512,maskable-512}.v4.png and apple-touch-icon-180.v4.png (opaque black). Tab favicon: scripts/make-tab-favicon.py",
+);

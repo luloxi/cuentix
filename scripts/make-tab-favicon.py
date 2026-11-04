@@ -1,31 +1,103 @@
-"""Favicon de pestaña (escritorio) de Cuentix: logo recortado al máximo, fondo transparente, sin cuadrado negro.
-Sale de public/brand/cuentix-icon.v2.svg (la "x" es naranja #e2781b). No toca los íconos PWA/apple-touch (scripts/make-cuentix-icons.mjs).
-Escribe public/favicon-tab.v3.svg, public/icons/favicon-32.v3.png, public/icons/favicon.v3.ico y src/app/favicon.ico.
-Requiere cairosvg y Pillow."""
+"""Favicon de pestaña de Cuentix (Ticket 2).
+
+Lee public/favicon-tab.v4.svg: recorte apretado, fondo transparente, el dibujo
+llena el viewBox. No lo regenera desde el ícono PWA (esa variante es más
+gruesa y ya viene cropeada).
+
+Escribe public/icons/favicon-32.v4.png, public/icons/favicon.v4.ico (16/32/48,
+PNG embebido en RGBA para que Next lo acepte) y src/app/favicon.ico.
+
+No toca los íconos PWA ni apple-touch (scripts/make-cuentix-icons.mjs).
+Requiere cairosvg y Pillow.
+"""
 import io
-import re
+import struct
 from pathlib import Path
 
 import cairosvg
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-SUFFIX = "v3"
+SUFFIX = "v4"
 
 
-def render(svg, size):
-    png = cairosvg.svg2png(bytestring=svg.encode(), output_width=size, output_height=size)
-    return Image.open(io.BytesIO(png)).convert("RGBA")
+def render(svg: str, size: int) -> Image.Image:
+    # Rasterize the vectors at the target pixel size. Downsampling a big
+    # render softens the 16px tab icon; cairo at 1:1 keeps the strokes crisp.
+    png = cairosvg.svg2png(
+        bytestring=svg.encode(),
+        output_width=size,
+        output_height=size,
+    )
+    image = Image.open(io.BytesIO(png)).convert("RGBA")
+    if image.size != (size, size):
+        raise SystemExit(f"favicon render is {image.size}, expected {size}x{size}")
+    return image
 
 
-src = (ROOT / "public/brand/cuentix-icon.v2.svg").read_text()
-src = re.sub(r'\s*<rect width="512" height="512" fill="#000000"/>', "", src)
-x0, y0, x1, y1 = render(src, 512).getchannel("A").point(lambda a: 255 if a > 8 else 0).getbbox()
-side, cx, cy = max(x1 - x0, y1 - y0), (x0 + x1) / 2, (y0 + y1) / 2
-tab = re.sub(r'viewBox="[^"]*"', f'viewBox="{cx - side / 2:.1f} {cy - side / 2:.1f} {side:.1f} {side:.1f}"', src, count=1)
-tab = re.sub(r'(<svg[^>]*?) width="512" height="512"', r'\1 width="32" height="32"', tab, count=1)
-(ROOT / f"public/favicon-tab.{SUFFIX}.svg").write_text(tab)
-render(tab, 32).save(ROOT / f"public/icons/favicon-32.{SUFFIX}.png", optimize=True)
-for out in (ROOT / f"public/icons/favicon.{SUFFIX}.ico", ROOT / "src/app/favicon.ico"):
-    render(tab, 48).save(out, format="ICO", sizes=[(16, 16), (32, 32), (48, 48)], append_images=[render(tab, 16), render(tab, 32)])
-print("tab favicon written")
+def assert_fills_canvas(image: Image.Image) -> None:
+    """Transparent plate, and the artwork spans the cropped viewBox."""
+    alpha = image.getchannel("A")
+    width, height = image.size
+    px = image.load()
+    for x, y in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)):
+        if px[x, y][3] > 8:
+            raise SystemExit(f"favicon corner {x},{y} is not transparent")
+    bbox = alpha.point(lambda a: 255 if a > 8 else 0).getbbox()
+    if bbox is None:
+        raise SystemExit("favicon has no ink")
+    x0, y0, x1, y1 = bbox
+    span_x = (x1 - x0) / width
+    span_y = (y1 - y0) / height
+    # Square crop of a taller ticket: height fills the canvas, width stays close.
+    if span_y < 0.9 or span_x < 0.75:
+        raise SystemExit(
+            f"favicon does not fill the canvas (span {span_x:.2f} x {span_y:.2f})"
+        )
+
+
+def assert_ico_rgba_png(path: Path) -> None:
+    data = path.read_bytes()
+    reserved, kind, count = struct.unpack_from("<HHH", data, 0)
+    if reserved != 0 or kind != 1 or count != 3:
+        raise SystemExit(f"{path.name}: expected a 3-image ICO, got {reserved},{kind},{count}")
+    sizes = []
+    offset = 6
+    for _ in range(count):
+        width, height, _colors, _res, _planes, bpp, size, image_at = struct.unpack_from(
+            "<BBBBHHII", data, offset
+        )
+        offset += 16
+        chunk = data[image_at : image_at + size]
+        if chunk[:8] != b"\x89PNG\r\n\x1a\n":
+            raise SystemExit(f"{path.name}: image {width}x{height} is not a PNG")
+        # PNG: 8 signature + 4 length + 4 "IHDR" + 4 width + 4 height + 1 bit depth.
+        color_type = chunk[25]
+        if color_type != 6 or bpp != 32:
+            raise SystemExit(
+                f"{path.name}: image {width}x{height} is not RGBA (color type {color_type}, bpp {bpp})"
+            )
+        sizes.append(width or 256)
+    if sizes != [16, 32, 48]:
+        raise SystemExit(f"{path.name}: sizes {sizes}, expected 16/32/48")
+
+
+src = (ROOT / f"public/favicon-tab.{SUFFIX}.svg").read_text()
+png32 = render(src, 32)
+assert_fills_canvas(png32)
+png32.save(ROOT / f"public/icons/favicon-32.{SUFFIX}.png", optimize=True)
+
+frames = {size: render(src, size) for size in (16, 32, 48)}
+for out in (
+    ROOT / f"public/icons/favicon.{SUFFIX}.ico",
+    ROOT / "src/app/favicon.ico",
+):
+    frames[48].save(
+        out,
+        format="ICO",
+        sizes=[(16, 16), (32, 32), (48, 48)],
+        append_images=[frames[16], frames[32]],
+    )
+    assert_ico_rgba_png(out)
+
+print("tab favicon written (favicon-32.v4.png, favicon.v4.ico, src/app/favicon.ico)")
