@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { isAbortError, readJson } from "@/hooks/use-json-resource";
-import { FiwindReclassifyAction } from "@/components/fiwind-reclassify-action";
 
 type AllowedRow = {
   email: string;
@@ -193,18 +192,6 @@ export function AdminPanel({ readOnly = false }: { readOnly?: boolean }) {
         Solo las cuentas en esta lista pueden iniciar sesión con Google. El
         administrador siempre tiene acceso.
       </p>
-
-      {!readOnly && (
-      <div className="rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800">
-        <h2 className="font-semibold">Ruido Fiwind</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Aplica al hogar de esta sesión. No aparece en el menú.
-        </p>
-        <div className="mt-3">
-          <FiwindReclassifyAction />
-        </div>
-      </div>
-      )}
     </div>
   );
 }
