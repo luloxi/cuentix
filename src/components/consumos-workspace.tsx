@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LayoutList, LineChart, List } from "lucide-react";
+import { LayoutList, LineChart, List, Wallet } from "lucide-react";
+import { FiwindReclassifyPanel } from "@/components/fiwind-reclassify-panel";
 import { MesAMesView } from "@/components/mes-a-mes";
 import { TransactionsTable } from "@/components/transactions-table";
 import { PageStack, SegmentedControl, Toast } from "@/components/ui";
 
-type Tab = "lista" | "resumen" | "charts";
+type Tab = "lista" | "resumen" | "charts" | "fiwind";
 
 function tabFromParam(raw: string | null): Tab {
-  if (raw === "resumen" || raw === "charts" || raw === "lista") return raw;
+  if (raw === "resumen" || raw === "charts" || raw === "lista" || raw === "fiwind") return raw;
   return "lista";
 }
 
@@ -85,6 +86,11 @@ export function ConsumosWorkspace() {
             label: "Gráficos",
             icon: <LineChart className="h-3.5 w-3.5" />,
           },
+          {
+            id: "fiwind",
+            label: "Fiwind",
+            icon: <Wallet className="h-3.5 w-3.5" />,
+          },
         ]}
       />
 
@@ -101,6 +107,8 @@ export function ConsumosWorkspace() {
       <div className="min-h-[40vh]">
         {tab === "lista" ? (
           <TransactionsTable key={tableKey} />
+        ) : tab === "fiwind" ? (
+          <FiwindReclassifyPanel key={tableKey} onToast={setToast} />
         ) : (
           <MesAMesView mode={tab === "charts" ? "charts" : "resumen"} />
         )}
