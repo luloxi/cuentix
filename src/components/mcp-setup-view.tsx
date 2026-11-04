@@ -244,8 +244,7 @@ headers = { Authorization = "Bearer ${snippetToken}" }`;
         </p>
         <p className="text-sm leading-relaxed text-amber-900/90 dark:text-amber-100/90">
           <strong>Nunca pegues el token en un chat</strong>, ni en issues, ni
-          en el repo. Si se filtró, rotálo acá: el anterior deja de andar. Polar
-          (suscripción) sigue aparte y pausado: esto no lo toca.
+          en el repo. Si se filtró, rotálo acá: el anterior deja de andar.
         </p>
       </Surface>
 
@@ -508,14 +507,8 @@ headers = { Authorization = "Bearer ${snippetToken}" }`;
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
           <Link
-            href="/cargas"
-            className="lc-btn lc-btn-ghost !px-3 !py-2 text-sm"
-          >
-            Ir a Cargas
-          </Link>
-          <Link
             href="/compartido"
-            className="lc-btn lc-btn-ghost !px-3 !py-2 text-sm"
+            className="lc-btn lc-btn-ghost min-h-10 cursor-pointer !px-3 !py-2 text-sm"
           >
             Ir al hogar
           </Link>

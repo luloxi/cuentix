@@ -28,7 +28,10 @@ export function HogarCharts() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Error");
-        if (!cancelled) setExpenses(data.expenses ?? []);
+        if (!cancelled) {
+          const rows = data.chartExpenses ?? data.expenses ?? [];
+          setExpenses(rows);
+        }
       } catch (e) {
         if (!cancelled)
           setError(e instanceof Error ? e.message : "Error de red");

@@ -9,7 +9,7 @@ type AllowedRow = {
   source: "admin" | "db" | "env";
 };
 
-export function AdminPanel() {
+export function AdminPanel({ readOnly = false }: { readOnly?: boolean }) {
   const [emails, setEmails] = useState<AllowedRow[]>([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +103,12 @@ export function AdminPanel() {
 
   return (
     <div className="space-y-6">
+      {readOnly && (
+        <p className="text-sm text-[var(--muted-fg)]">
+          Podés ver quién tiene acceso. Sumar o quitar un email no está en esta versión.
+        </p>
+      )}
+      {!readOnly && (
       <form
         onSubmit={(e) => void addEmail(e)}
         className="flex flex-col gap-2 sm:flex-row"
@@ -124,6 +130,7 @@ export function AdminPanel() {
           {saving ? "Guardando…" : "Habilitar acceso"}
         </button>
       </form>
+      )}
 
       {error && (
         <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
@@ -155,7 +162,7 @@ export function AdminPanel() {
                       : "Lista"}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {row.source === "db" ? (
+                  {!readOnly && row.source === "db" ? (
                     <button
                       type="button"
                       disabled={saving}
@@ -189,6 +196,7 @@ export function AdminPanel() {
         administrador siempre tiene acceso.
       </p>
 
+      {!readOnly && (
       <div className="rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800">
         <h2 className="font-semibold">Ruido Fiwind</h2>
         <p className="mt-1 text-sm text-zinc-500">
@@ -198,6 +206,7 @@ export function AdminPanel() {
           <FiwindReclassifyAction />
         </div>
       </div>
+      )}
     </div>
   );
 }

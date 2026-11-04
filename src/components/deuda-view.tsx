@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn, formatArs, formatUsd, formatDateAr } from "@/lib/utils";
 import {
@@ -499,11 +498,7 @@ export function DeudaView() {
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
           Sin saldo de deuda. Escribí el{" "}
           <span className="font-semibold">Saldo actual</span> de tu tarjeta
-          arriba, o importá el resumen PDF/Excel en{" "}
-          <Link href="/cargas" className="font-semibold underline underline-offset-2">
-            Cargas
-          </Link>
-          . El saldo de la cuenta corriente no cuenta como deuda.
+          arriba. El saldo de la cuenta corriente no cuenta como deuda.
         </p>
       )}
 

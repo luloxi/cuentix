@@ -242,24 +242,6 @@ export function CompartidoView() {
     });
   }
 
-  function openAddExpense(preset?: {
-    categorySlug?: string;
-    description?: string;
-  }) {
-    window.dispatchEvent(
-      new CustomEvent("lc:open-add-expense", {
-        detail: preset
-          ? {
-              categorySlug: preset.categorySlug,
-              description: preset.description,
-              ownership: "shared" as const,
-              mode: "manual" as const,
-            }
-          : undefined,
-      }),
-    );
-  }
-
   function toggleSkipped(slug: string) {
     setSkipped((prev) => {
       const next = new Set(prev);
@@ -517,7 +499,7 @@ export function CompartidoView() {
                               <button
                                 type="button"
                                 onClick={() => toggleSkipped(svc.slug)}
-                                className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)]"
+                                className="inline-flex min-h-10 min-w-10 cursor-pointer items-center justify-center rounded-full border border-[var(--border)] px-3 text-[11px] font-semibold text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)]"
                               >
                                 Reactivar
                               </button>
@@ -532,27 +514,13 @@ export function CompartidoView() {
                                 </span>
                               </>
                             ) : (
-                              <div className="flex flex-col items-end gap-3">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    openAddExpense({
-                                      categorySlug: svc.slug,
-                                      description: svc.name,
-                                    })
-                                  }
-                                  className="rounded-full border border-dashed border-[var(--border)] px-3 py-1.5 text-[11px] font-semibold text-[var(--muted-fg)] transition hover:border-[var(--brand)]/40 hover:text-[var(--brand-fg)]"
-                                >
-                                  Cargar
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSkipped(svc.slug)}
-                                  className="px-1 py-0.5 text-[10px] font-medium text-[var(--muted-fg)]/70 underline-offset-2 hover:text-[var(--muted-fg)] hover:underline"
-                                >
-                                  No aplica
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => toggleSkipped(svc.slug)}
+                                className="inline-flex min-h-10 min-w-10 cursor-pointer items-center justify-center rounded-full border border-[var(--border)] px-3 text-[11px] font-semibold text-[var(--muted-fg)] transition hover:bg-[var(--surface-muted)]"
+                              >
+                                No aplica
+                              </button>
                             )}
                           </div>
                         </li>
@@ -560,9 +528,7 @@ export function CompartidoView() {
                     })}
                   </ul>
                   <p className="border-t border-[var(--border)] px-4 py-2.5 text-[11px] leading-relaxed text-[var(--muted-fg)]">
-                    Al cargar se marca como <strong>Hogar</strong> y con la
-                    categoría del servicio. Si no usan gas u otro servicio,
-                    tocá <strong>No aplica</strong>.
+                    Si no usan gas u otro servicio, tocá <strong>No aplica</strong>.
                   </p>
                 </>
               )}

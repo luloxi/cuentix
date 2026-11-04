@@ -1,5 +1,9 @@
-import { SoonPage } from "@/components/soon-page";
+import { ShareTargetClient } from "@/components/share-target-client";
 
 export default function Page() {
-  return <SoonPage title="Compartir" />;
+  return (
+    <div className="py-4">
+      <ShareTargetClient />
+    </div>
+  );
 }

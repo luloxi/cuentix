@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown, ChevronLeft, ChevronRight, Download, FileSpreadsheet, FileText, Search, SlidersHorizontal, X, List,
@@ -1178,20 +1177,14 @@ export function TransactionsTable() {
           description={
             activeFilterCount > 0
               ? "Sacá un filtro o limpiá todo. Seguro está, escondido."
-              : period
-                ? "Probá otro mes, o cargá el resumen de la tarjeta."
-                : "Cargá el Excel o el PDF, o sumá un gasto con el botón de abajo."
+              : "Probá otro mes. Los movimientos de este hogar aparecen acá."
           }
           action={
             activeFilterCount > 0 ? (
-              <button type="button" onClick={clearFilters} className="lc-btn lc-btn-secondary">
+              <button type="button" onClick={clearFilters} className="lc-btn lc-btn-secondary min-h-10 cursor-pointer">
                 Limpiar filtros
               </button>
-            ) : (
-              <Link href="/cargas" className="lc-btn lc-btn-primary">
-                Cargá el resumen
-              </Link>
-            )
+            ) : undefined
           }
         />
       ) : (

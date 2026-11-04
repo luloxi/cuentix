@@ -333,6 +333,7 @@ textarea::placeholder {
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--input-fg);
+  min-height: 2.5rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   line-height: 1.25rem;
@@ -357,6 +358,7 @@ textarea::placeholder {
   justify-content: center;
   gap: 0.375rem;
   border-radius: 0.625rem;
+  min-height: 2.5rem;
   padding: 0.5rem 0.95rem;
   font-size: 0.875rem;
   font-weight: 550;
@@ -427,6 +429,7 @@ html.dark .lc-btn-primary {
   justify-content: center;
   gap: 0.35rem;
   border-radius: 0;
+  min-height: 2.5rem;
   padding: 0.65rem 0.5rem;
   font-size: 0.8125rem;
   font-weight: 500;

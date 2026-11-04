@@ -119,7 +119,7 @@ function OwnershipChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-2.5 py-1 text-xs font-medium transition",
+        "inline-flex min-h-10 items-center rounded-full border px-3 text-xs font-medium transition",
         active
           ? "border-[var(--brand)]/40 bg-[var(--brand-soft)] text-[var(--brand-fg)]"
           : "border-[var(--border)] text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]",
@@ -933,7 +933,7 @@ export function MesAMesView({
                   onClick={goPrev}
                   disabled={!canPrev}
                   aria-label="Mes anterior"
-                  className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2 text-[var(--foreground)] transition hover:bg-[var(--surface-muted)] disabled:cursor-not-allowed disabled:opacity-30"
+                  className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] transition hover:bg-[var(--surface-muted)] disabled:cursor-not-allowed disabled:opacity-30"
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
@@ -942,7 +942,7 @@ export function MesAMesView({
                   onClick={goNext}
                   disabled={!canNext}
                   aria-label="Mes siguiente"
-                  className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2 text-[var(--foreground)] transition hover:bg-[var(--surface-muted)] disabled:cursor-not-allowed disabled:opacity-30"
+                  className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] transition hover:bg-[var(--surface-muted)] disabled:cursor-not-allowed disabled:opacity-30"
                 >
                   <ChevronRight className="h-4 w-4" />
                 </button>

@@ -36,3 +36,50 @@ export function currentCalendarMonth(now = new Date()): string {
 export function isCurrentCalendarMonth(period: string, now = new Date()): boolean {
   return period === currentCalendarMonth(now);
 }
+
+const YEAR_MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/;
+
+/** True for a calendar month `YYYY-MM`. */
+export function isYearMonth(value: string | null | undefined): value is string {
+  return Boolean(value && YEAR_MONTH.test(value));
+}
+
+/**
+ * Honor a selected `?period=YYYY-MM`. Anything else (missing, `all`, junk)
+ * falls back to the current calendar month.
+ */
+export function selectedPeriod(
+  raw: string | null | undefined,
+  fallback: string,
+): string {
+  return isYearMonth(raw) ? raw : fallback;
+}
+
+/** `count` months ending at `from`, newest first. */
+export function recentPeriods(from: string, count = 24): string[] {
+  if (!isYearMonth(from) || count <= 0) return [];
+  const out: string[] = [];
+  const [year, month] = from.split("-").map(Number);
+  let y = year!;
+  let m = month!;
+  for (let i = 0; i < count; i++) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m -= 1;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+  }
+  return out;
+}
+
+/** Period dropdown options: recent months plus the current selection. */
+export function periodSelectOptions(
+  selected: string,
+  from: string,
+  count = 24,
+): string[] {
+  const set = new Set(recentPeriods(from, count));
+  if (isYearMonth(selected)) set.add(selected);
+  return [...set].sort().reverse();
+}

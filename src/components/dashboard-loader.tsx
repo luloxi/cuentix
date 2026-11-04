@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardHome } from "@/components/dashboard-home";
-import { SoonPage } from "@/components/soon-page";
+import { periodSelectOptions, selectedPeriod } from "@/lib/period-label";
 import { currentPeriodAr } from "@/lib/utils";
 
 type DashboardData = {
@@ -38,6 +40,15 @@ type DashboardData = {
 };
 
 export function DashboardLoader() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const fallback = currentPeriodAr();
+  const period = selectedPeriod(searchParams.get("period"), fallback);
+  const periods = useMemo(
+    () => periodSelectOptions(period, fallback, 24),
+    [period, fallback],
+  );
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missingHome, setMissingHome] = useState(false);
@@ -45,8 +56,9 @@ export function DashboardLoader() {
   useEffect(() => {
     let cancelled = false;
     function load() {
-      const period = currentPeriodAr();
-      void fetch(`/api/dashboard?period=${period}`, { credentials: "include" })
+      void fetch(`/api/dashboard?period=${encodeURIComponent(period)}`, {
+        credentials: "include",
+      })
         .then(async (res) => {
           const body = (await res.json().catch(() => null)) as DashboardData | null;
           if (cancelled) return;
@@ -78,9 +90,29 @@ export function DashboardLoader() {
       window.removeEventListener("lc:household-switched", load);
       window.removeEventListener("lc:expense-created", load);
     };
-  }, []);
+  }, [period]);
 
-  if (missingHome) return <SoonPage title="Tu espacio" />;
+  function onPeriodChange(next: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === fallback) params.delete("period");
+    else params.set("period", next);
+    const qs = params.toString();
+    router.replace(qs ? `/dashboard?${qs}` : "/dashboard", { scroll: false });
+  }
+
+  if (missingHome) {
+    return (
+      <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center px-4 py-20 text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">Tu espacio</h1>
+        <p className="mt-3 max-w-sm text-sm text-[var(--muted-fg)]">
+          Esta cuenta todavía no tiene un hogar.
+        </p>
+        <Link href="/onboarding" className="lc-btn lc-btn-primary mt-6">
+          Ir a tu espacio
+        </Link>
+      </div>
+    );
+  }
   if (error) {
     return <p className="text-sm text-red-600">{error}</p>;
   }
@@ -90,7 +122,9 @@ export function DashboardLoader() {
   return (
     <DashboardHome
       firstName={data.firstName}
-      period={data.period}
+      period={period}
+      periods={periods}
+      onPeriodChange={onPeriodChange}
       prevPeriod={data.prevPeriod}
       totalArs={data.totalArs}
       prevTotalArs={data.prevTotalArs}

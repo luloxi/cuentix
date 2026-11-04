@@ -1,5 +1,5 @@
-import { SoonPage } from "@/components/soon-page";
+import { RedirectInicio } from "@/components/redirect-inicio";
 
 export default function Page() {
-  return <SoonPage title="Importar" />;
+  return <RedirectInicio />;
 }
