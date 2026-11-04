@@ -5,7 +5,10 @@ import {
   isUser,
   requireUser,
 } from "./auth";
+import { handleBillingSubscription } from "./billing";
+import { handleCargas } from "./cargas";
 import { handleCategories } from "./categories";
+import { handleCompartidoStats } from "./compartido";
 import { handleDashboard } from "./dashboard";
 import type { Env, WorkerContext } from "./env";
 import {
@@ -18,6 +21,7 @@ import {
 } from "./finance";
 import { json, notPorted } from "./http";
 import { handleHouseholdActive, handleMe } from "./household-routes";
+import { handleIncomes } from "./incomes-api";
 import { flushOutbox } from "./serpix-sync";
 import { handleSvc } from "./svc";
 import { handleTransactions } from "./transactions";
@@ -64,6 +68,16 @@ const worker = {
       if (path === "/api/patrimonio/snapshot") return await handlePatrimonioSnapshot(req, env, user);
       if (path === "/api/patrimonio" && req.method === "GET") {
         return await handlePatrimonio(req, env, user);
+      }
+      if (path === "/api/incomes") return await handleIncomes(req, env, user);
+      if (path === "/api/cargas" && req.method === "GET") {
+        return await handleCargas(req, env, user);
+      }
+      if (path === "/api/stats/compartido" && req.method === "GET") {
+        return await handleCompartidoStats(req, env, user);
+      }
+      if (path === "/api/billing/subscription" && req.method === "GET") {
+        return await handleBillingSubscription(req, env, user);
       }
       return notPorted();
     } catch (err) {

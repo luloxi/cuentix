@@ -62,6 +62,9 @@ export interface Env {
   MCP_SERVICE_USER_EMAIL?: string;
   /** Override in tests. Prod sets it in wrangler vars. */
   SERPIX_SYNC_URL?: string;
+  /** Polar billing. Optional. Never log. */
+  POLAR_ACCESS_TOKEN?: string;
+  POLAR_PRODUCT_ID?: string;
 }
 
 /** Subset of the Workers execution context. Tests pass a fake. */
