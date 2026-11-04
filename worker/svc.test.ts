@@ -253,7 +253,7 @@ async function call(path: string, env: Env, extra?: { token?: string | null; coo
   const headers = new Headers(bearer(extra?.token === undefined ? TOKEN : extra.token));
   if (extra?.cookie) headers.set("cookie", extra.cookie);
   return worker.fetch(
-    new Request(`https://cuentix.test${path}`, { method: extra?.method ?? "GET", headers }),
+    new Request(`https://tarask.test${path}`, { method: extra?.method ?? "GET", headers }),
     env,
   );
 }
@@ -341,7 +341,7 @@ describe("service api", { concurrency: false }, () => {
     assert.deepEqual(september.topCategories, [{ name: "Alquiler", slug: "alquiler", amount: 3000 }]);
 
     const dashRes = await handleDashboard(
-      new Request("https://cuentix.test/api/dashboard?period=2026-08"),
+      new Request("https://tarask.test/api/dashboard?period=2026-08"),
       env,
       luciano,
     );
@@ -390,7 +390,7 @@ describe("service api", { concurrency: false }, () => {
         flujo: unknown;
       };
     };
-    const debtRes = await handleDebtStats(new Request("https://cuentix.test/api/stats/deuda"), env, luciano);
+    const debtRes = await handleDebtStats(new Request("https://tarask.test/api/stats/deuda"), env, luciano);
     const debtBody = (await debtRes.json()) as { cardStatus: string; summary: unknown };
     assert.equal(wealth.debt.cardStatus, debtBody.cardStatus);
     assert.deepEqual(wealth.debt.summary, debtBody.summary);
@@ -400,7 +400,7 @@ describe("service api", { concurrency: false }, () => {
     assert.equal(wealth.debt.summary.settled, false);
     assert.equal(wealth.debt.summary.primaryCardLast4, "4242");
 
-    const ahorrosRes = await handleAhorros(new Request("https://cuentix.test/api/ahorros"), env, luciano);
+    const ahorrosRes = await handleAhorros(new Request("https://tarask.test/api/ahorros"), env, luciano);
     const ahorrosBody = (await ahorrosRes.json()) as { summary: unknown };
     assert.deepEqual(wealth.savings, ahorrosBody.summary);
     assert.equal(wealth.savings.totalArs, 500000);
@@ -409,7 +409,7 @@ describe("service api", { concurrency: false }, () => {
     assert.equal(wealth.savings.totalUsd, 125);
     assert.equal(wealth.savings.netArs, 687500);
 
-    const patRes = await handlePatrimonio(new Request("https://cuentix.test/api/patrimonio"), env, luciano);
+    const patRes = await handlePatrimonio(new Request("https://tarask.test/api/patrimonio"), env, luciano);
     const patBody = (await patRes.json()) as Record<string, unknown>;
     const { changes, ...patrimonioRest } = wealth.patrimonio;
     assert.deepEqual(patrimonioRest, patBody);
@@ -512,18 +512,18 @@ describe("service api", { concurrency: false }, () => {
 
     const dashCookie = await call("/api/dashboard?period=2026-08", env, {
       token: null,
-      cookie: `cuentix_session=${COOKIE}`,
+      cookie: `tarask_session=${COOKIE}`,
     });
     assert.equal(dashCookie.status, 200);
 
     const svcCookieOnly = await call("/api/svc/deuda-ahorro-patrimonio", env, {
       token: null,
-      cookie: `cuentix_session=${COOKIE}`,
+      cookie: `tarask_session=${COOKIE}`,
     });
     assert.equal(svcCookieOnly.status, 401);
 
     const asOther = await call("/api/svc/deuda-ahorro-patrimonio", env, {
-      cookie: `cuentix_session=${OTHER_COOKIE}`,
+      cookie: `tarask_session=${OTHER_COOKIE}`,
     });
     assert.equal(asOther.status, 200);
     const asOtherBody = (await asOther.json()) as { savings: { totalArs: number } };

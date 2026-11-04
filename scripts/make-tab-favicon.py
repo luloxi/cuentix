@@ -1,4 +1,4 @@
-"""Favicon de pestaña de Cuentix (Ticket 2), variante chica.
+"""Favicon de pestaña de Tarask (Ticket 2), variante chica.
 
 Lee public/favicon-tab.v5.svg: recorte apretado, fondo transparente, el dibujo
 llena el viewBox. Sin las dos líneas internas (se empastan a 16px) y con el
@@ -8,7 +8,7 @@ Escribe public/icons/favicon-32.v5.png, public/icons/favicon.v5.ico (16/32/48,
 los tres tamaños salen del mismo svg, PNG embebido en RGBA para que Next lo
 acepte) y src/app/favicon.ico.
 
-No toca los íconos PWA ni apple-touch (scripts/make-cuentix-icons.mjs).
+No toca los íconos PWA ni apple-touch (scripts/make-tarask-icons.mjs).
 Requiere cairosvg y Pillow.
 """
 import io

@@ -196,7 +196,7 @@ describe("household visibility on finance queries", () => {
     });
     const log: LogEntry[] = [];
     const res = await handleDebtStats(
-      new Request("https://cuentix.test/api/stats/deuda"),
+      new Request("https://tarask.test/api/stats/deuda"),
       envFor(db, log),
       userB,
     );
@@ -229,7 +229,7 @@ describe("patrimonio snapshots", () => {
 
     primeFxForTests({ blue: null });
     const res = await handlePatrimonioSnapshot(
-      new Request("https://cuentix.test/api/patrimonio/snapshot", { method: "POST" }),
+      new Request("https://tarask.test/api/patrimonio/snapshot", { method: "POST" }),
       env,
       userA,
     );
@@ -242,7 +242,7 @@ describe("patrimonio snapshots", () => {
     assert.equal(body.current.fxRate, null);
     assert.equal(body.current.netWorthArs, null);
     assert.equal(writes(log).length, 0);
-    const ahorros = await handleAhorros(new Request("https://cuentix.test/api/ahorros"), env, userA);
+    const ahorros = await handleAhorros(new Request("https://tarask.test/api/ahorros"), env, userA);
     const summary = ((await ahorros.json()) as { summary: { netArs: number | null; blueRate: number | null } }).summary;
     assert.equal(summary.blueRate, null);
     assert.equal(summary.netArs, null);
@@ -351,7 +351,7 @@ describe("patrimonio snapshots", () => {
     const log: LogEntry[] = [];
     primeFxForTests({ blue: 1000 });
     const res = await handlePatrimonio(
-      new Request("https://cuentix.test/api/patrimonio"),
+      new Request("https://tarask.test/api/patrimonio"),
       envFor(db, log, { throwOnWrite: true }),
       userA,
     );
@@ -403,7 +403,7 @@ describe("patrimonio snapshots", () => {
 
     primeFxForTests({ blue: 2000 });
     const res = await handlePatrimonioSnapshot(
-      new Request("https://cuentix.test/api/patrimonio/snapshot", { method: "POST" }),
+      new Request("https://tarask.test/api/patrimonio/snapshot", { method: "POST" }),
       env,
       userA,
     );
@@ -464,7 +464,7 @@ describe("monthly cash flow", () => {
     const log: LogEntry[] = [];
     primeFxForTests({ blue: 1000, byDate: new Map([[`${month}-28`, 1000]]) });
     const res = await handlePatrimonio(
-      new Request("https://cuentix.test/api/patrimonio"),
+      new Request("https://tarask.test/api/patrimonio"),
       envFor(db, log),
       userB,
     );
@@ -495,7 +495,7 @@ describe("monthly cash flow", () => {
     const log: LogEntry[] = [];
     primeFxForTests({ blue: 1000 });
     const res = await handlePatrimonio(
-      new Request("https://cuentix.test/api/patrimonio"),
+      new Request("https://tarask.test/api/patrimonio"),
       envFor(db, log),
       userB,
     );
@@ -516,11 +516,11 @@ describe("savings note and snapshot triggers", () => {
     primeFxForTests({ blue: 1000 });
     const env = envFor(db, []);
     const refreshed = await handleAhorros(
-      new Request("https://cuentix.test/api/ahorros?refresh=1"),
+      new Request("https://tarask.test/api/ahorros?refresh=1"),
       env,
       userA,
     );
-    const plain = await handleAhorros(new Request("https://cuentix.test/api/ahorros"), env, userA);
+    const plain = await handleAhorros(new Request("https://tarask.test/api/ahorros"), env, userA);
     const note = "Saldos guardados, sin sync en vivo.";
     assert.equal(((await refreshed.json()) as { summary: { balanceNote: string } }).summary.balanceNote, note);
     assert.equal(((await plain.json()) as { summary: { balanceNote: string } }).summary.balanceNote, note);
@@ -532,7 +532,7 @@ describe("savings note and snapshot triggers", () => {
     primeFxForTests({ blue: 1000 });
     const env = envFor(db, []);
     const created = await handleAhorros(
-      new Request("https://cuentix.test/api/ahorros", {
+      new Request("https://tarask.test/api/ahorros", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ kind: "bank", label: "Caja", amountArs: 100, amountUsd: 0 }),
@@ -550,7 +550,7 @@ describe("savings note and snapshot triggers", () => {
     assert.equal(row.net_worth_ars, "100.00");
 
     const patched = await handleAhorros(
-      new Request("https://cuentix.test/api/ahorros", {
+      new Request("https://tarask.test/api/ahorros", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id, amountArs: 180, amountUsd: 0 }),
@@ -560,7 +560,7 @@ describe("savings note and snapshot triggers", () => {
     );
     assert.equal(patched.status, 200);
     const saved = await handleDebtSettings(
-      new Request("https://cuentix.test/api/debt-settings", {
+      new Request("https://tarask.test/api/debt-settings", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ saldoDeudaArs: 30, saldoDeudaUsd: 2, cardLast4: "4242" }),

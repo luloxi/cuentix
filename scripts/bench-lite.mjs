@@ -21,7 +21,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const PORT = 8787;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
-const TOKEN = "cuentix-lite-local-test";
+const TOKEN = "tarask-lite-local-test";
 const USER_ID = "e7a4756a-97b8-4038-b57e-5aac635c85bf";
 const HASH = createHash("sha256").update(TOKEN).digest("hex");
 const EXPIRES = Date.now() + 30 * 24 * 60 * 60 * 1000;
@@ -79,7 +79,7 @@ function percentile(sorted, p) {
 }
 
 async function sample(route) {
-  const headers = route.auth ? { cookie: `cuentix_session=${TOKEN}` } : {};
+  const headers = route.auth ? { cookie: `tarask_session=${TOKEN}` } : {};
   const times = [];
   let status = 0;
   let location = "";

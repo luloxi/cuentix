@@ -1,7 +1,7 @@
 import type { D1Prepared, Env } from "./env";
 
 /**
- * Cuentix -> Serpix outbox. Web Crypto only. Callers batch the returned
+ * Tarask -> Serpix outbox. Web Crypto only. Callers batch the returned
  * statements with the movement write, then ctx.waitUntil(flushOutbox).
  * Flush never throws and never logs the body, the signature, or the secret.
  */

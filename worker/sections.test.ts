@@ -199,7 +199,7 @@ describe("section apis", { concurrency: false }, () => {
     seed(db);
     primeFxForTests({ blue: 1000 });
     const august = await handleIncomes(
-      new Request("https://cuentix.test/api/incomes?period=2026-08", {
+      new Request("https://tarask.test/api/incomes?period=2026-08", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db),
@@ -223,7 +223,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.ok((augustChart?.amountArs ?? 0) >= 600000);
 
     const other = await handleIncomes(
-      new Request("https://cuentix.test/api/incomes?period=2026-08", {
+      new Request("https://tarask.test/api/incomes?period=2026-08", {
         headers: { cookie: "lc_household=h2" },
       }),
       envFor(db),
@@ -233,7 +233,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.deepEqual(otherBody.incomes.map((row) => row.id), ["inc-h2"]);
 
     const july = await handleIncomes(
-      new Request("https://cuentix.test/api/incomes?period=2026-07", {
+      new Request("https://tarask.test/api/incomes?period=2026-07", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db),
@@ -248,7 +248,7 @@ describe("section apis", { concurrency: false }, () => {
     const db = openDb();
     seed(db);
     const created = await handleIncomes(
-      new Request("https://cuentix.test/api/incomes", {
+      new Request("https://tarask.test/api/incomes", {
         method: "POST",
         headers: { cookie: "lc_household=h1", "content-type": "application/json" },
         body: JSON.stringify({
@@ -270,7 +270,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(row.hid, "h1");
 
     const removed = await handleIncomes(
-      new Request(`https://cuentix.test/api/incomes?id=${createdBody.income.id}`, {
+      new Request(`https://tarask.test/api/incomes?id=${createdBody.income.id}`, {
         method: "DELETE",
         headers: { cookie: "lc_household=h1" },
       }),
@@ -286,7 +286,7 @@ describe("section apis", { concurrency: false }, () => {
     const db = openDb();
     seed(db);
     const res = await handleCargas(
-      new Request("https://cuentix.test/api/cargas", { headers: { cookie: "lc_household=h1" } }),
+      new Request("https://tarask.test/api/cargas", { headers: { cookie: "lc_household=h1" } }),
       envFor(db),
       user,
     );
@@ -311,7 +311,7 @@ describe("section apis", { concurrency: false }, () => {
     seed(db);
     primeFxForTests({ blue: 1000 });
     const res = await handleCompartidoStats(
-      new Request("https://cuentix.test/api/stats/compartido?period=2026-08", {
+      new Request("https://tarask.test/api/stats/compartido?period=2026-08", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db),
@@ -343,7 +343,7 @@ describe("section apis", { concurrency: false }, () => {
     const db = openDb();
     seed(db);
     const res = await handleBillingSubscription(
-      new Request("https://cuentix.test/api/billing/subscription"),
+      new Request("https://tarask.test/api/billing/subscription"),
       envFor(db),
       user,
     );
@@ -391,7 +391,7 @@ describe("section apis", { concurrency: false }, () => {
     ).run();
 
     const august = await handleMesAMes(
-      new Request("https://cuentix.test/api/stats/mes-a-mes?period=2026-08", {
+      new Request("https://tarask.test/api/stats/mes-a-mes?period=2026-08", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db),
@@ -418,7 +418,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(body.coupleBalance.period, "2026-08");
 
     const personal = await handleMesAMes(
-      new Request("https://cuentix.test/api/stats/mes-a-mes?period=all&ownership=personal", {
+      new Request("https://tarask.test/api/stats/mes-a-mes?period=all&ownership=personal", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db),
@@ -430,7 +430,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(personalBody.months.find((month) => month.period === "2026-08")?.totalArsCombined, 2300);
 
     const other = await handleMesAMes(
-      new Request("https://cuentix.test/api/stats/mes-a-mes?period=all", {
+      new Request("https://tarask.test/api/stats/mes-a-mes?period=all", {
         headers: { cookie: "lc_household=h2" },
       }),
       envFor(db),
@@ -443,13 +443,13 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(otherBody.months[0]?.totalArsCombined, 50);
 
     const bad = await handleMesAMes(
-      new Request("https://cuentix.test/api/stats/mes-a-mes?period=2026-13"),
+      new Request("https://tarask.test/api/stats/mes-a-mes?period=2026-13"),
       envFor(db),
       user,
     );
     assert.equal(bad.status, 400);
     const posted = await handleMesAMes(
-      new Request("https://cuentix.test/api/stats/mes-a-mes", { method: "POST" }),
+      new Request("https://tarask.test/api/stats/mes-a-mes", { method: "POST" }),
       envFor(db),
       user,
     );
@@ -460,7 +460,7 @@ describe("section apis", { concurrency: false }, () => {
     const db = openDb();
     seed(db);
     const home = await handleGrupo(
-      new Request("https://cuentix.test/api/grupo", { headers: { cookie: "lc_household=h1" } }),
+      new Request("https://tarask.test/api/grupo", { headers: { cookie: "lc_household=h1" } }),
       envFor(db),
       user,
     );
@@ -476,7 +476,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(body.members.some((member) => member.userId === "user-b"), true);
 
     const other = await handleGrupo(
-      new Request("https://cuentix.test/api/grupo", { headers: { cookie: "lc_household=h2" } }),
+      new Request("https://tarask.test/api/grupo", { headers: { cookie: "lc_household=h2" } }),
       envFor(db),
       user,
     );
@@ -484,7 +484,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(otherBody.inviteCode, "CODE0002");
     assert.equal(otherBody.members.some((member) => member.userId === "user-b"), false);
     const posted = await handleGrupo(
-      new Request("https://cuentix.test/api/grupo", { method: "POST" }),
+      new Request("https://tarask.test/api/grupo", { method: "POST" }),
       envFor(db),
       user,
     );
@@ -495,7 +495,7 @@ describe("section apis", { concurrency: false }, () => {
     const db = openDb();
     seed(db);
     const res = await handleReceipts(
-      new Request("https://cuentix.test/api/receipts", { headers: { cookie: "lc_household=h1" } }),
+      new Request("https://tarask.test/api/receipts", { headers: { cookie: "lc_household=h1" } }),
       envFor(db),
       user,
     );
@@ -516,14 +516,14 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(text.includes("image_url"), false);
 
     const other = await handleReceipts(
-      new Request("https://cuentix.test/api/receipts", { headers: { cookie: "lc_household=h2" } }),
+      new Request("https://tarask.test/api/receipts", { headers: { cookie: "lc_household=h2" } }),
       envFor(db),
       user,
     );
     const otherBody = (await other.json()) as { receipts: unknown[] };
     assert.equal(otherBody.receipts.length, 0);
     const posted = await handleReceipts(
-      new Request("https://cuentix.test/api/receipts", { method: "POST" }),
+      new Request("https://tarask.test/api/receipts", { method: "POST" }),
       envFor(db),
       user,
     );
@@ -536,14 +536,14 @@ describe("section apis", { concurrency: false }, () => {
     const now = Date.now();
     db.prepare("INSERT INTO allowed_emails (email, created_at, created_by) VALUES ('guest@example.com', ?, 'user-a')").run(now);
     const denied = await handleAllowedEmails(
-      new Request("https://cuentix.test/api/admin/allowed-emails"),
+      new Request("https://tarask.test/api/admin/allowed-emails"),
       envFor(db),
       user,
     );
     assert.equal(denied.status, 403);
 
     const res = await handleAllowedEmails(
-      new Request("https://cuentix.test/api/admin/allowed-emails"),
+      new Request("https://tarask.test/api/admin/allowed-emails"),
       envFor(db, { ALLOWED_EMAILS: "extra@example.com" }),
       { ...user, email: ADMIN_EMAIL },
     );
@@ -557,7 +557,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(sources.get("extra@example.com"), "env");
     assert.equal(JSON.stringify(body).includes("created_by"), false);
     const posted = await handleAllowedEmails(
-      new Request("https://cuentix.test/api/admin/allowed-emails", { method: "POST" }),
+      new Request("https://tarask.test/api/admin/allowed-emails", { method: "POST" }),
       envFor(db),
       { ...user, email: ADMIN_EMAIL },
     );
@@ -577,7 +577,7 @@ describe("section apis", { concurrency: false }, () => {
        VALUES ('tok-old', 'h1', 'old-hash', 'gone', 1, 2)`,
     ).run();
     const res = await handleAgentToken(
-      new Request("https://cuentix.test/api/household/agent-token", {
+      new Request("https://tarask.test/api/household/agent-token", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db),
@@ -599,7 +599,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(text.includes("token_hash"), false);
 
     const none = await handleAgentToken(
-      new Request("https://cuentix.test/api/household/agent-token"),
+      new Request("https://tarask.test/api/household/agent-token"),
       envFor(db),
       { ...user, id: "user-missing" },
     );
@@ -608,7 +608,7 @@ describe("section apis", { concurrency: false }, () => {
     assert.equal(noneBody.hasToken, false);
     assert.equal(noneBody.token, null);
     const posted = await handleAgentToken(
-      new Request("https://cuentix.test/api/household/agent-token", { method: "DELETE" }),
+      new Request("https://tarask.test/api/household/agent-token", { method: "DELETE" }),
       envFor(db),
       user,
     );
@@ -629,7 +629,7 @@ describe("section apis", { concurrency: false }, () => {
       "/api/admin/allowed-emails",
       "/api/household/agent-token",
     ]) {
-      const res = await worker.fetch(new Request(`https://cuentix.test${path}`), env);
+      const res = await worker.fetch(new Request(`https://tarask.test${path}`), env);
       assert.equal(res.status, 401, path);
     }
   });
@@ -637,7 +637,7 @@ describe("section apis", { concurrency: false }, () => {
   it("routes an authenticated GET /api/grupo through the worker", async () => {
     const db = openDb();
     seed(db);
-    const token = "cuentix-section-test";
+    const token = "tarask-section-test";
     const hash = createHash("sha256").update(token).digest("hex");
     const now = Date.now();
     db.prepare(
@@ -649,8 +649,8 @@ describe("section apis", { concurrency: false }, () => {
        VALUES ('sess-1', ?, ?, ?, ?, 'user-a')`,
     ).run(now + 60_000, hash, now, now);
     const res = await worker.fetch(
-      new Request("https://cuentix.test/api/grupo", {
-        headers: { cookie: `cuentix_session=${token}` },
+      new Request("https://tarask.test/api/grupo", {
+        headers: { cookie: `tarask_session=${token}` },
       }),
       envFor(db),
     );

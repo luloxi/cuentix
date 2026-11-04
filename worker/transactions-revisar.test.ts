@@ -177,7 +177,7 @@ describe("GET /api/transactions revisar", () => {
       isCredit: 1,
     });
     const res = await handleTransactions(
-      new Request("https://cuentix.test/api/transactions?limit=50"),
+      new Request("https://tarask.test/api/transactions?limit=50"),
       envFor(db),
       user,
     );
@@ -199,7 +199,7 @@ describe("GET /api/transactions revisar", () => {
     const db = openDb();
     const env = envFor(db);
     const transfer = await handleTransactions(
-      new Request("https://cuentix.test/api/transactions", {
+      new Request("https://tarask.test/api/transactions", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ date: "2026-08-10", description: "TRANSFERENCIA", amountArs: 120 }),
@@ -208,7 +208,7 @@ describe("GET /api/transactions revisar", () => {
       user,
     );
     const spend = await handleTransactions(
-      new Request("https://cuentix.test/api/transactions", {
+      new Request("https://tarask.test/api/transactions", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ date: "2026-08-11", description: "Cafe", amountArs: 50 }),

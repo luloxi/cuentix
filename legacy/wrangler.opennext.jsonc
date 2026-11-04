@@ -29,9 +29,9 @@
     "binding": "AI"
   },
   "vars": {
-    "NEXT_PUBLIC_APP_URL": "https://cuentix.lulox.com.ar",
-    "AUTH_URL": "https://cuentix.lulox.com.ar",
-    "BETTER_AUTH_URL": "https://cuentix.lulox.com.ar"
+    "NEXT_PUBLIC_APP_URL": "https://tarask.lulox.com.ar",
+    "AUTH_URL": "https://tarask.lulox.com.ar",
+    "BETTER_AUTH_URL": "https://tarask.lulox.com.ar"
   },
   "observability": { "enabled": true }
 }

@@ -7,7 +7,7 @@ export async function GET() {
   if ("error" in authResult) return authResult.error;
 
   return NextResponse.json({
-    name: "Cuentix agent API",
+    name: "Tarask agent API",
     auth: "Authorization: Bearer <token del hogar>. Fallback admin/dev: AGENT_API_TOKEN",
     actingAs: {
       id: authResult.user.id,

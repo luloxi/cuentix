@@ -6,7 +6,7 @@
  * - debounced resolution
  * - blockie / ENS avatar
  * - shows resolved address under the field
- * Styled with Cuentix tokens (lc-input).
+ * Styled with Tarask tokens (lc-input).
  */
 
 import { useEffect, useMemo, useState } from "react";

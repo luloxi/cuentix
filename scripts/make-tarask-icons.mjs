@@ -1,7 +1,7 @@
 /**
- * Rasterize public/brand/cuentix-icon.v4.svg into the PWA icon set.
+ * Rasterize public/brand/tarask-icon.v4.svg into the PWA icon set.
  *
- *   node scripts/make-cuentix-icons.mjs
+ *   node scripts/make-tarask-icons.mjs
  *
  * sharp is a devDependency (librsvg). "any" and apple-touch outputs are
  * opaque black, full-bleed, no alpha. The maskable PNG scales the mark so
@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const masterPath = path.join(root, "public/brand/cuentix-icon.v4.svg");
+const masterPath = path.join(root, "public/brand/tarask-icon.v4.svg");
 const iconsDir = path.join(root, "public/icons");
 const SIZE = 512;
 const SAFE_DIAMETER = 0.66 * SIZE;

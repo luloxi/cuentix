@@ -104,7 +104,7 @@ describe("dashboard income household", () => {
     primeFxForTests({ blue: 1000 });
     const log: string[] = [];
     const home = await handleDashboard(
-      new Request("https://cuentix.test/api/dashboard?period=2026-08", {
+      new Request("https://tarask.test/api/dashboard?period=2026-08", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db, log),
@@ -116,7 +116,7 @@ describe("dashboard income household", () => {
 
     const otherLog: string[] = [];
     const other = await handleDashboard(
-      new Request("https://cuentix.test/api/dashboard?period=2026-08", {
+      new Request("https://tarask.test/api/dashboard?period=2026-08", {
         headers: { cookie: "lc_household=h2" },
       }),
       envFor(db, otherLog),
@@ -133,7 +133,7 @@ describe("dashboard income household", () => {
     seed(db);
     primeFxForTests({ blue: 1000 });
     const july = await handleDashboard(
-      new Request("https://cuentix.test/api/dashboard?period=2026-07", {
+      new Request("https://tarask.test/api/dashboard?period=2026-07", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db, []),
@@ -154,7 +154,7 @@ describe("dashboard income household", () => {
     assert.equal(julyBody.monthTxCount, 1);
 
     const august = await handleDashboard(
-      new Request("https://cuentix.test/api/dashboard?period=2026-08", {
+      new Request("https://tarask.test/api/dashboard?period=2026-08", {
         headers: { cookie: "lc_household=h1" },
       }),
       envFor(db, []),
@@ -174,7 +174,7 @@ describe("dashboard income household", () => {
     assert.equal(augustBody.monthTxCount, 1);
 
     const bad = await handleDashboard(
-      new Request("https://cuentix.test/api/dashboard?period=2026-13"),
+      new Request("https://tarask.test/api/dashboard?period=2026-13"),
       envFor(db, []),
       user,
     );

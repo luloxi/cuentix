@@ -152,7 +152,7 @@ function ctxOf(): WorkerContext & { pending: Promise<unknown>[] } {
 }
 
 function patch(body: unknown): Request {
-  return new Request("https://cuentix.test/api/transactions", {
+  return new Request("https://tarask.test/api/transactions", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -693,7 +693,7 @@ describe("mark path", () => {
       await Promise.all(ctx.pending.splice(0));
       log.length = 0;
       const res = await handleTransactions(
-        new Request("https://cuentix.test/api/transactions?limit=10"),
+        new Request("https://tarask.test/api/transactions?limit=10"),
         env,
         user,
       );

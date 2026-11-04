@@ -233,7 +233,7 @@ export const transactions = sqliteTable(
 );
 
 /**
- * Outbox for Cuentix -> Serpix. Written in the same D1 batch as the movement.
+ * Outbox for Tarask -> Serpix. Written in the same D1 batch as the movement.
  * The request path does not use Drizzle; see worker/serpix-sync.ts.
  */
 export const serpixOutbox = sqliteTable(

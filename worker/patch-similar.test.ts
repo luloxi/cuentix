@@ -131,7 +131,7 @@ function envFor(db: DatabaseSync): Env {
 function patch(body: unknown, householdId?: string): Request {
   const headers = new Headers({ "content-type": "application/json" });
   if (householdId) headers.set("cookie", `lc_household=${householdId}`);
-  return new Request("https://cuentix.test/api/transactions", {
+  return new Request("https://tarask.test/api/transactions", {
     method: "PATCH",
     headers,
     body: JSON.stringify(body),

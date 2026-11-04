@@ -172,7 +172,7 @@ function categoryOf(db: DatabaseSync, id: string): string | null {
 function request(path: string, cookie = "lc_household=h1", init?: RequestInit): Request {
   const headers = new Headers(init?.headers);
   headers.set("cookie", cookie);
-  return new Request(`https://cuentix.test${path}`, { ...init, headers });
+  return new Request(`https://tarask.test${path}`, { ...init, headers });
 }
 
 function post(body: unknown, cookie = "lc_household=h1"): Request {
@@ -711,7 +711,7 @@ describe("fiwind reclassify", () => {
     insertTx(db, { id: "one", description: "Pago a DIA" });
     const env = envFor(db);
     for (const path of ["/api/fiwind/movements?period=2026-08", "/api/fiwind/similar?id=one", "/api/fiwind/reclassify"]) {
-      const res = await worker.fetch(new Request(`https://cuentix.test${path}`), env);
+      const res = await worker.fetch(new Request(`https://tarask.test${path}`), env);
       assert.equal(res.status, 401, path);
     }
     const token = "session-token";
@@ -721,8 +721,8 @@ describe("fiwind reclassify", () => {
       "INSERT INTO auth_session (id, expires_at, token, user_id) VALUES ('s1', ?, ?, 'u1')",
     ).run(Date.now() + 60_000, hash);
     const authed = await worker.fetch(
-      new Request("https://cuentix.test/api/fiwind/movements?period=2026-08", {
-        headers: { cookie: `cuentix_session=${encodeURIComponent(token)}; lc_household=h1` },
+      new Request("https://tarask.test/api/fiwind/movements?period=2026-08", {
+        headers: { cookie: `tarask_session=${encodeURIComponent(token)}; lc_household=h1` },
       }),
       env,
     );

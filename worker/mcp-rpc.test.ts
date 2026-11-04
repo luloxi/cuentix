@@ -227,7 +227,7 @@ function pinFx() {
 
 async function httpGet(path: string, env: Env) {
   return worker.fetch(
-    new Request(`https://cuentix.test${path}`, {
+    new Request(`https://tarask.test${path}`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     }),
     env,
@@ -266,7 +266,7 @@ describe("McpRpc", { concurrency: false }, () => {
     const noToken = envFor(db, { token: null });
 
     const bareHttp = await worker.fetch(
-      new Request("https://cuentix.test/api/svc/deuda-ahorro-patrimonio"),
+      new Request("https://tarask.test/api/svc/deuda-ahorro-patrimonio"),
       noToken,
     );
     assert.equal(bareHttp.status, 401);

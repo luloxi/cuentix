@@ -1,5 +1,5 @@
-const COOKIE = "cuentix_session";
-export const OAUTH_COOKIE = "cuentix_oauth";
+const COOKIE = "tarask_session";
+export const OAUTH_COOKIE = "tarask_oauth";
 export const HOUSEHOLD_COOKIE = "lc_household";
 
 export function json(data: unknown, status = 200, cookies?: string[]): Response {

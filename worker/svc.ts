@@ -238,11 +238,11 @@ function parseLimit(raw: unknown): number | Response {
 }
 
 function bareRequest(): Request {
-  return new Request("https://cuentix.local/api/svc");
+  return new Request("https://tarask.local/api/svc");
 }
 
 function movementsRequest(period: string | null, q: string | null): Request {
-  const url = new URL("https://cuentix.local/api/svc/ultimos-movimientos");
+  const url = new URL("https://tarask.local/api/svc/ultimos-movimientos");
   if (period) url.searchParams.set("period", period);
   if (q != null && q !== "") url.searchParams.set("q", q);
   return new Request(url);

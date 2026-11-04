@@ -96,7 +96,7 @@ function envFor(db: DatabaseSync): Env {
 }
 
 function post(body: unknown): Request {
-  return new Request("https://cuentix.test/api/transactions", {
+  return new Request("https://tarask.test/api/transactions", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -104,7 +104,7 @@ function post(body: unknown): Request {
 }
 
 function patch(body: unknown): Request {
-  return new Request("https://cuentix.test/api/transactions", {
+  return new Request("https://tarask.test/api/transactions", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),

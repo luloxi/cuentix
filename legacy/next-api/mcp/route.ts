@@ -191,7 +191,7 @@ const mcpHandler = createMcpHandler(
       version: "1.0.0",
     },
     instructions:
-      "Cuentix MCP: consultá e importá finanzas del hogar. Auth: Authorization Bearer <token del hogar> (se genera en /mcp). Fallback admin/dev: AGENT_API_TOKEN. Los números vienen de la base; no inventes montos. El token solo ve ese hogar.",
+      "Tarask MCP: consultá e importá finanzas del hogar. Auth: Authorization Bearer <token del hogar> (se genera en /mcp). Fallback admin/dev: AGENT_API_TOKEN. Los números vienen de la base; no inventes montos. El token solo ve ese hogar.",
   },
 );
 
