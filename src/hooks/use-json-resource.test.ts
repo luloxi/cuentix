@@ -1,6 +1,58 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isAbortError, messageFromBody, readJson } from "./use-json-resource";
+import {
+  isAbortError,
+  messageFromBody,
+  readJson,
+  settleWaiters,
+  type Waiter,
+} from "./use-json-resource";
+
+function waiterLog(): { map: Map<number, Waiter>; log: string[] } {
+  const log: string[] = [];
+  const map = new Map<number, Waiter>();
+  for (const token of [1, 2, 3]) {
+    map.set(token, {
+      resolve: () => log.push(`ok${token}`),
+      reject: (e) => log.push(`err${token}:${(e as Error).message}`),
+    });
+  }
+  return { map, log };
+}
+
+describe("settleWaiters", () => {
+  it("resolves the token and every older waiter, and keeps newer ones", () => {
+    const { map, log } = waiterLog();
+    settleWaiters(map, 2, undefined);
+    assert.deepEqual(log, ["ok1", "ok2"]);
+    assert.deepEqual([...map.keys()], [3]);
+  });
+
+  it("resolves when a fetch is aborted so reload() does not hang", async () => {
+    const map = new Map<number, Waiter>();
+    const pending = new Promise<void>((resolve, reject) => {
+      map.set(1, { resolve, reject });
+    });
+    // What the effect cleanup does after ac.abort().
+    settleWaiters(map, 1, undefined);
+    await pending;
+    assert.equal(map.size, 0);
+  });
+
+  it("rejects the token and older waiters with the error", () => {
+    const { map, log } = waiterLog();
+    settleWaiters(map, 1, new Error("boom"));
+    assert.deepEqual(log, ["err1:boom"]);
+    assert.deepEqual([...map.keys()], [2, 3]);
+  });
+
+  it("does nothing when no waiter is at or below the token", () => {
+    const map = new Map<number, Waiter>();
+    settleWaiters(map, 5, undefined);
+    assert.equal(map.size, 0);
+  });
+});
+
 
 describe("messageFromBody", () => {
   it("uses a non-empty string error", () => {
