@@ -49,6 +49,9 @@ INTERNAL_PHRASES = (
 BALANCE_SEED = (
     ("Fiwind", "USDT", 1961.41, "2026-11-03", "manual"),
     ("Fiwind", "ARS", 10145.02, "2026-11-03", "manual"),
+    ("Brubank", "ARS", 0, "2026-11-04", "manual"),
+    ("Wallets", "USDT", 0, "2026-11-04", "manual"),
+    ("BBVA caja", "ARS", 203275, "2026-11-04", "manual"),
 )
 
 
@@ -130,11 +133,28 @@ def blocked_credit_shape(folded: str) -> bool:
     return generic_description(folded) or folded.startswith("debin ")
 
 
-def classify(category: str, description: str, is_credit: int, is_payment: int, raw_amount: float) -> tuple[str, str, float, bool]:
+def classify(
+    category: str,
+    description: str,
+    is_credit: int,
+    is_payment: int,
+    raw_amount: float,
+    account: str = "",
+    usd_only: bool = False,
+) -> tuple[str, str, float, bool]:
     folded = fold(description)
     credit = bool(is_credit)
     payment = bool(is_payment)
     ambiguous = False
+    # USDT leg of an ARS payment already stored that day. A negative USD-only
+    # credit would otherwise net spending down. ARS refunds stay expenses.
+    usdt_payment_leg = (
+        account == "Fiwind"
+        and credit
+        and usd_only
+        and raw_amount < 0
+        and (folded.startswith("pago a") or folded.startswith("devolucion de"))
+    )
 
     if category in INTERNAL_CATEGORIES:
         kind = "internal_transfer"
@@ -158,6 +178,9 @@ def classify(category: str, description: str, is_credit: int, is_payment: int, r
         kind = "income"
         out_category = "Ingreso"
         ambiguous = True
+    elif usdt_payment_leg:
+        kind = "internal_transfer"
+        out_category = "Conversiones"
     else:
         kind = "expense"
         out_category = category or "Uncategorized"
@@ -278,12 +301,17 @@ def main() -> int:
             continue
         currency, raw_amount, suffix = chosen
         category = row["category"] or "Uncategorized"
+        ars_value = parse_amount(row["amount_ars"])
+        usd_value = parse_amount(row["amount_usd"])
+        usd_only = (ars_value is None or ars_value == 0) and usd_value is not None and usd_value != 0
         kind, out_category, amount, is_ambiguous = classify(
             category,
             row["description_raw"] or "",
             int(row["is_credit"] or 0),
             int(row["is_payment"] or 0),
             raw_amount,
+            account,
+            usd_only,
         )
         description = (row["description_raw"] or "").strip() + suffix
         external = row["external_fingerprint"] or hashlib.sha256(
@@ -408,7 +436,10 @@ def main() -> int:
         if seen[key] > 1:
             item["external_key"] = f"{key}~{seen[key]}"
 
-    accounts = sorted({item["account"] for item in kept} | {"Fiwind", "BBVA caja", "BBVA tarjeta", "Brubank", "Sin cuenta"})
+    accounts = sorted(
+        {item["account"] for item in kept}
+        | {"Fiwind", "BBVA caja", "BBVA tarjeta", "Brubank", "Wallets"}
+    )
     categories = sorted({item["category"] for item in kept} | {"Ingreso", "Rendimientos", "Transferencia interna", "Conversiones", "Uncategorized"})
 
     lines: list[str] = [
