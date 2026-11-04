@@ -26,6 +26,14 @@ import {
 } from "./serpix-sync";
 import { reintegroFlags } from "./reintegro-flags";
 import { loadExcludedMovementIds } from "./transfer-class";
+import {
+  similarBinds,
+  similarCountFromProbe,
+  similarCountSql,
+  similarUpdateSql,
+  type SimilarFilter,
+  type SimilarKey,
+} from "./similar-sql";
 import { consumosVisibleSql } from "./sql";
 
 const MAX_LIMIT = 100;
@@ -899,48 +907,56 @@ async function patchTransaction(
 
   let similarUpdated = 0;
   let similarCount = 0;
+  let similarCapped = false;
   const categoryId = typeof body.categoryId === "string" ? body.categoryId : null;
-  const applyToSimilar = body.applyToSimilar === true || body.applyToSimilar === 1 || body.applyToSimilar === "true";
-  if (categoryId && before.description_normalized && (categoryId !== before.category_id || applyToSimilar)) {
-    const count = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM transactions
-       WHERE household_id = ? AND description_normalized = ?`,
-    )
-      .bind(active.id, before.description_normalized)
-      .first<{ n: number }>();
-    similarCount = num(count?.n);
+  const applyToSimilar =
+    body.applyToSimilar === true || body.applyToSimilar === 1 || body.applyToSimilar === "true";
+  const sharedOnly = forceSharedOnly(active.name);
+  const similarKey: SimilarKey = {
+    householdId: active.id,
+    description: before.description_normalized,
+    excludeId: before.id,
+    userId: user.id,
+  };
+  if (
+    categoryId &&
+    before.description_normalized &&
+    (categoryId !== before.category_id || applyToSimilar)
+  ) {
+    const filter: SimilarFilter = { sharedOnly, extra: "category_id IS NOT ?" };
+    const probe = await readSimilar(env, filter, similarKey, [categoryId]);
+    similarCount = probe.total;
+    similarCapped = probe.capped;
     if (applyToSimilar) {
-      const updated = await env.DB.prepare(
-        `UPDATE transactions SET category_id = ?, updated_at = ?
-         WHERE household_id = ? AND description_normalized = ? AND id != ?`,
-      )
-        .bind(categoryId, now, active.id, before.description_normalized, before.id)
-        .run();
-      similarUpdated = num(updated.meta?.changes);
+      similarUpdated = await writeSimilar(
+        env,
+        "category_id = ?, updated_at = ?",
+        [categoryId, now],
+        filter,
+        similarKey,
+        [categoryId],
+      );
     }
   }
 
   let reintegroCount = 0;
   let cubiertoCount = 0;
   if ((wantsReintegro || wantsCubierto) && before.description_normalized) {
-    const count = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM transactions
-       WHERE household_id = ? AND description_normalized = ?`,
-    )
-      .bind(active.id, before.description_normalized)
-      .first<{ n: number }>();
-    const n = num(count?.n);
-    if (wantsReintegro) reintegroCount = n;
-    if (wantsCubierto) cubiertoCount = n;
+    const filter: SimilarFilter = { sharedOnly, extra: "is_payment = 0" };
+    const probe = await readSimilar(env, filter, similarKey, []);
+    if (wantsReintegro) reintegroCount = probe.total;
+    if (wantsCubierto) cubiertoCount = probe.total;
     if (applyToSimilar) {
-      const updated = await env.DB.prepare(
-        `UPDATE transactions SET is_payment = 1, updated_at = ?
-         WHERE household_id = ? AND description_normalized = ? AND id != ?`,
-      )
-        .bind(now, active.id, before.description_normalized, before.id)
-        .run();
-      similarUpdated = num(updated.meta?.changes);
-      similarCount = n;
+      similarUpdated = await writeSimilar(
+        env,
+        "is_payment = 1, updated_at = ?",
+        [now],
+        filter,
+        similarKey,
+        [],
+      );
+      similarCount = probe.total;
+      similarCapped = probe.capped;
     }
   }
 
@@ -955,8 +971,35 @@ async function patchTransaction(
     moved: false,
     householdReimbursement: wantsReintegro,
     householdBillCovered: wantsCubierto,
+    ...(similarCapped ? { similarCapped: true } : {}),
     ...(possibleDuplicate ? { possibleDuplicate: true, duplicateOf } : {}),
   });
+}
+
+async function readSimilar(
+  env: Env,
+  filter: SimilarFilter,
+  key: SimilarKey,
+  extra: readonly unknown[],
+): Promise<{ total: number; capped: boolean }> {
+  const row = await env.DB.prepare(similarCountSql(filter))
+    .bind(...similarBinds(filter, key, extra))
+    .first<{ n: number }>();
+  return similarCountFromProbe(num(row?.n));
+}
+
+async function writeSimilar(
+  env: Env,
+  setSql: string,
+  setBinds: readonly unknown[],
+  filter: SimilarFilter,
+  key: SimilarKey,
+  extra: readonly unknown[],
+): Promise<number> {
+  const updated = await env.DB.prepare(similarUpdateSql(setSql, filter))
+    .bind(...setBinds, ...similarBinds(filter, key, extra))
+    .run();
+  return num(updated.meta?.changes);
 }
 
 async function moveTransaction(
