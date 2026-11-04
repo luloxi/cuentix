@@ -1,0 +1,5 @@
+# Copy to .dev.vars for `wrangler dev`. Values are local only.
+# Set the real values with `wrangler secret put <NAME>` before deploy.
+ACCESS_KEY=
+SESSION_SECRET=
+BALANCES_TOKEN=

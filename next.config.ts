@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 /**
- * Static export served by Workers Static Assets. The OpenNext runtime config
- * lives in legacy/wrangler.opennext.jsonc and is not part of this build.
+ * Static HTML only. Workers Static Assets serves `out/`.
+ * The API is a separate Worker, not a Next.js route handler.
  */
 const nextConfig: NextConfig = {
   output: "export",

@@ -1,16 +1,8 @@
-import { Suspense } from "react";
-import { LoginClient } from "@/components/login-client";
+import type { Metadata } from "next";
+import { LoginView } from "@/components/login-view";
+
+export const metadata: Metadata = { title: "Entrar" };
 
 export default function LoginPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="flex min-h-dvh items-center justify-center text-sm text-[var(--muted-fg)]">
-          Cargando…
-        </main>
-      }
-    >
-      <LoginClient />
-    </Suspense>
-  );
+  return <LoginView />;
 }

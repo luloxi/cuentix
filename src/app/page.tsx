@@ -1,21 +1,8 @@
-"use client";
+import type { Metadata } from "next";
+import { GastosView } from "@/components/gastos-view";
 
-import { useEffect } from "react";
+export const metadata: Metadata = { title: { absolute: "Gastos · Cuentix" } };
 
 export default function HomePage() {
-  useEffect(() => {
-    void fetch("/api/me", { credentials: "include" })
-      .then((res) => {
-        window.location.replace(res.ok ? "/dashboard" : "/login");
-      })
-      .catch(() => {
-        window.location.replace("/login");
-      });
-  }, []);
-
-  return (
-    <main className="flex min-h-dvh items-center justify-center text-sm text-[var(--muted-fg)]">
-      Cargando…
-    </main>
-  );
+  return <GastosView />;
 }
