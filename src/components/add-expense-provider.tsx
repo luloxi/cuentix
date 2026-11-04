@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { AddExpenseModal } from "@/components/add-expense-modal";
+import { useJsonResource } from "@/hooks/use-json-resource";
 
 type Category = { id: string; slug: string; name: string };
 type Member = { userId: string; name: string };
@@ -39,46 +40,29 @@ export function AddExpenseProvider({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [viewerUserId, setViewerUserId] = useState<string | null>(null);
   const [preset, setPreset] = useState<AddExpensePreset | null>(null);
-
-  const loadMeta = useCallback(async () => {
-    try {
-      const [meRes, catRes] = await Promise.all([
-        fetch("/api/me", { credentials: "include" }),
-        fetch("/api/categories", { credentials: "include" }),
-      ]);
-      if (meRes.ok) {
-        const me = (await meRes.json()) as {
-          user?: { id?: string };
-          members?: Member[];
-        };
-        setMembers(me.members ?? []);
-        if (me.user?.id) setViewerUserId(me.user.id);
-      }
-      if (catRes.ok) {
-        const cats = (await catRes.json()) as { categories?: Category[] };
-        setCategories(cats.categories ?? []);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+  const me = useJsonResource<{
+    user?: { id?: string };
+    members?: Member[];
+  }>("/api/me", [], { staleWhileReload: true });
+  const cats = useJsonResource<{ categories?: Category[] }>("/api/categories", [], {
+    staleWhileReload: true,
+  });
+  const members = me.data?.members ?? [];
+  const viewerUserId = me.data?.user?.id ?? null;
+  const categories = cats.data?.categories ?? [];
+  const reloadMe = me.reload;
+  const reloadCats = cats.reload;
 
   const openAddExpense = useCallback(
     (nextPreset?: AddExpensePreset) => {
       setPreset(nextPreset ?? null);
       setOpen(true);
-      void loadMeta();
+      void reloadMe();
+      void reloadCats();
     },
-    [loadMeta],
+    [reloadMe, reloadCats],
   );
-
-  useEffect(() => {
-    void loadMeta();
-  }, [loadMeta]);
 
   useEffect(() => {
     function onOpen(e: Event) {

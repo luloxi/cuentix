@@ -47,6 +47,11 @@ export function AppNav() {
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [seenPath, setSeenPath] = useState(pathname);
+  if (pathname !== seenPath) {
+    setSeenPath(pathname);
+    setMoreOpen(false);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -58,10 +63,6 @@ export function AppNav() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    setMoreOpen(false);
-  }, [pathname]);
 
   useEffect(() => {
     if (!moreOpen) return;

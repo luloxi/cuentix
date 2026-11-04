@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { isAbortError } from "@/hooks/use-json-resource";
 import {
   ExternalLink,
   Landmark,
@@ -37,6 +38,16 @@ type Summary = {
 };
 
 type AddKind = "evm" | "cardano" | "bank" | null;
+
+async function fetchAhorros(refresh: boolean, signal?: AbortSignal) {
+  const res = await fetch(`/api/ahorros${refresh ? "?refresh=1" : ""}`, {
+    credentials: "include",
+    signal,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Error");
+  return data as { assets?: Asset[]; summary?: Summary | null };
+}
 
 function looksLikeEnsLabel(label: string) {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(label.trim());
@@ -84,12 +95,7 @@ export function AhorrosView() {
     else setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/ahorros${refresh ? "?refresh=1" : ""}`,
-        { credentials: "include" },
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error");
+      const data = await fetchAhorros(refresh);
       setAssets(data.assets ?? []);
       setSummary(data.summary ?? null);
     } catch (e) {
@@ -101,8 +107,24 @@ export function AhorrosView() {
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const ac = new AbortController();
+    fetchAhorros(false, ac.signal)
+      .then((data) => {
+        if (ac.signal.aborted) return;
+        setAssets(data.assets ?? []);
+        setSummary(data.summary ?? null);
+        setError(null);
+        setLoading(false);
+        setRefreshing(false);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted || isAbortError(e)) return;
+        setError(e instanceof Error ? e.message : "Error de red");
+        setLoading(false);
+        setRefreshing(false);
+      });
+    return () => ac.abort();
+  }, []);
 
   function openAdd(kind: Exclude<AddKind, null>) {
     setAddKind(kind);
@@ -481,13 +503,15 @@ function WalletRow({
   asset: Asset;
   onSave: (id: string, usd: string) => Promise<void>;
 }) {
+  const balanceKey = `${asset.id}:${asset.lastBalanceUsd ?? ""}`;
+  const [seenBalance, setSeenBalance] = useState(balanceKey);
   const [usd, setUsd] = useState(String(asset.lastBalanceUsd ?? ""));
   const [dirty, setDirty] = useState(false);
-
-  useEffect(() => {
+  if (balanceKey !== seenBalance) {
+    setSeenBalance(balanceKey);
     setUsd(String(asset.lastBalanceUsd ?? ""));
     setDirty(false);
-  }, [asset.lastBalanceUsd, asset.id]);
+  }
 
   return (
     <li className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
@@ -548,15 +572,17 @@ function BankRow({
   asset: Asset;
   onSave: (id: string, ars: string, usd: string) => Promise<void>;
 }) {
+  const balanceKey = `${asset.id}:${asset.amountArs ?? ""}:${asset.amountUsd ?? ""}`;
+  const [seenBalance, setSeenBalance] = useState(balanceKey);
   const [ars, setArs] = useState(String(asset.amountArs ?? ""));
   const [usd, setUsd] = useState(String(asset.amountUsd ?? ""));
   const [dirty, setDirty] = useState(false);
-
-  useEffect(() => {
+  if (balanceKey !== seenBalance) {
+    setSeenBalance(balanceKey);
     setArs(String(asset.amountArs ?? ""));
     setUsd(String(asset.amountUsd ?? ""));
     setDirty(false);
-  }, [asset.amountArs, asset.amountUsd, asset.id]);
+  }
 
   return (
     <li className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">

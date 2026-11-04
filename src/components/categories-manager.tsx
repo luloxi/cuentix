@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isAbortError } from "@/hooks/use-json-resource";
 import {
   Eye,
   EyeOff,
@@ -28,6 +29,16 @@ function displayName(name: string) {
   return name.toLowerCase() === "uncategorized" ? "Sin categoría" : name;
 }
 
+async function fetchCategoryRows(signal?: AbortSignal): Promise<CatRow[]> {
+  const res = await fetch("/api/categories", {
+    credentials: "include",
+    signal,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Error al cargar");
+  return (data.categories ?? []) as CatRow[];
+}
+
 export function CategoriesManager() {
   const [cats, setCats] = useState<CatRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,10 +53,7 @@ export function CategoriesManager() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/categories", { credentials: "include" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error al cargar");
-      setCats(data.categories ?? []);
+      setCats(await fetchCategoryRows());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally {
@@ -54,8 +62,21 @@ export function CategoriesManager() {
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const ac = new AbortController();
+    fetchCategoryRows(ac.signal)
+      .then((rows) => {
+        if (ac.signal.aborted) return;
+        setCats(rows);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted || isAbortError(e)) return;
+        setError(e instanceof Error ? e.message : "Error");
+        setLoading(false);
+      });
+    return () => ac.abort();
+  }, []);
 
   useEffect(() => {
     if (!toast) return;

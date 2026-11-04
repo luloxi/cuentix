@@ -15,6 +15,12 @@ import { cn } from "@/lib/utils";
 import { compressImageForUpload } from "@/lib/image-compress";
 import type { AddExpensePreset } from "@/components/add-expense-provider";
 import {
+  buildExpenseDraft,
+  lineItemsTotal,
+  nextCategoryId,
+  nextPayerId,
+} from "@/lib/expense-form";
+import {
   STATEMENT_FILE_ACCEPT,
   filesFromDrop,
   isStatementFileName,
@@ -147,7 +153,7 @@ function ChoiceRow({
   );
 }
 
-export function AddExpenseModal({
+function AddExpenseForm({
   open,
   onClose,
   onCreated,
@@ -166,18 +172,30 @@ export function AddExpenseModal({
 }) {
   const scanRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLInputElement>(null);
-  const wasOpen = useRef(false);
-  const [mode, setMode] = useState<"choose" | "manual">("choose");
+  const [draft] = useState(() =>
+    buildExpenseDraft({
+      preset,
+      categories,
+      members,
+      viewerUserId,
+      today: todayISO(),
+    }),
+  );
+  const [mode, setMode] = useState<"choose" | "manual">(draft.mode);
   const [fromScan, setFromScan] = useState(false);
-  const [date, setDate] = useState(todayISO());
-  const [description, setDescription] = useState("");
-  const [amountArs, setAmountArs] = useState("");
-  const [amountUsd, setAmountUsd] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [paidByUserId, setPaidByUserId] = useState("");
-  const [ownership, setOwnership] = useState<"personal" | "shared">("personal");
+  const [date, setDate] = useState(draft.date);
+  const [description, setDescription] = useState(draft.description);
+  const [amountArs, setAmountArs] = useState(draft.amountArs);
+  const [amountUsd, setAmountUsd] = useState(draft.amountUsd);
+  const [categoryId, setCategoryId] = useState(draft.categoryId);
+  const [paidByUserId, setPaidByUserId] = useState(draft.paidByUserId);
+  const [ownership, setOwnership] = useState<"personal" | "shared">(
+    draft.ownership,
+  );
   const [complex, setComplex] = useState(false);
-  const [items, setItems] = useState<LineItem[]>([newItem()]);
+  const [items, setItems] = useState<LineItem[]>(() => [newItem()]);
+  const [pricedItems, setPricedItems] = useState<LineItem[] | null>(null);
+  const [pricedComplex, setPricedComplex] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -186,79 +204,34 @@ export function AddExpenseModal({
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (open && !wasOpen.current) {
-      const p = preset;
-      setMode(p?.mode === "manual" ? "manual" : "choose");
-      setFromScan(false);
-      setDate(todayISO());
-      setDescription(p?.description ?? "");
-      setAmountArs("");
-      setAmountUsd("");
-
-      const bySlug = p?.categorySlug
-        ? categories.find((c) => c.slug === p.categorySlug)
-        : null;
-      setCategoryId(
-        bySlug?.id ??
-          categories.find((c) => c.slug === "uncategorized")?.id ??
-          categories[0]?.id ??
-          "",
-      );
-
-      const preferredPayer =
-        p?.paidByUserId && members.some((m) => m.userId === p.paidByUserId)
-          ? p.paidByUserId
-          : viewerUserId && members.some((m) => m.userId === viewerUserId)
-            ? viewerUserId
-            : (members[0]?.userId ?? "");
-      setPaidByUserId(preferredPayer);
-
-      setOwnership(p?.ownership === "shared" ? "shared" : "personal");
-      setComplex(false);
-      setItems([newItem()]);
-      setScanning(false);
-      setImporting(false);
-      setSaving(false);
-      setError(null);
-      setDuplicateNote(null);
-      setScanNote(null);
-      setImportNote(null);
+  if (open) {
+    const categoryNext = nextCategoryId(
+      categoryId,
+      categories,
+      preset?.categorySlug,
+    );
+    if (categoryNext != null) setCategoryId(categoryNext);
+    const payerNext = nextPayerId(
+      paidByUserId,
+      members,
+      preset?.paidByUserId,
+      viewerUserId,
+    );
+    if (payerNext != null) setPaidByUserId(payerNext);
+    const lineSum = lineItemsTotal(items);
+    if (complex) {
+      if ((items !== pricedItems || !pricedComplex) && lineSum > 0) {
+        setPricedItems(items);
+        setPricedComplex(true);
+        setAmountArs(lineSum.toFixed(2));
+      } else if (!pricedComplex) {
+        setPricedItems(items);
+        setPricedComplex(true);
+      }
+    } else if (pricedComplex) {
+      setPricedComplex(false);
     }
-    wasOpen.current = open;
-  }, [open, categories, members, preset, viewerUserId]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (preset?.categorySlug && categories.length > 0) {
-      const cat = categories.find((c) => c.slug === preset.categorySlug);
-      if (cat && categoryId !== cat.id) setCategoryId(cat.id);
-    } else if (!categoryId && categories[0]) {
-      setCategoryId(
-        categories.find((c) => c.slug === "uncategorized")?.id ??
-          categories[0].id,
-      );
-    }
-
-    if (!paidByUserId && members.length > 0) {
-      const preferred =
-        preset?.paidByUserId &&
-        members.some((m) => m.userId === preset.paidByUserId)
-          ? preset.paidByUserId
-          : viewerUserId && members.some((m) => m.userId === viewerUserId)
-            ? viewerUserId
-            : members[0]!.userId;
-      setPaidByUserId(preferred);
-    }
-  }, [
-    open,
-    categories,
-    members,
-    categoryId,
-    paidByUserId,
-    preset,
-    viewerUserId,
-  ]);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -268,20 +241,6 @@ export function AddExpenseModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, saving, scanning, importing, onClose]);
-
-  useEffect(() => {
-    if (!complex) return;
-    const sum = items.reduce((s, it) => {
-      let line = parseFloat(it.lineTotal.replace(",", "."));
-      if (!Number.isFinite(line)) {
-        const q = parseFloat(it.quantity.replace(",", ".")) || 0;
-        const u = parseFloat(it.unitPrice.replace(",", ".")) || 0;
-        line = q * u;
-      }
-      return s + (Number.isFinite(line) ? line : 0);
-    }, 0);
-    if (sum > 0) setAmountArs(sum.toFixed(2));
-  }, [complex, items]);
 
   async function onScanFile(file: File) {
     setScanning(true);
@@ -920,4 +879,23 @@ export function AddExpenseModal({
       </div>
     </div>
   );
+}
+
+export function AddExpenseModal(props: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+  categories: Category[];
+  members: Member[];
+  viewerUserId?: string | null;
+  preset?: AddExpensePreset | null;
+}) {
+  const [wasOpen, setWasOpen] = useState(props.open);
+  const [generation, setGeneration] = useState(0);
+  if (props.open !== wasOpen) {
+    setWasOpen(props.open);
+    if (props.open) setGeneration((value) => value + 1);
+  }
+  if (!props.open) return null;
+  return <AddExpenseForm key={generation} {...props} />;
 }

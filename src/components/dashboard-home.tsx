@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -24,6 +24,18 @@ import { CategoryIcon } from "@/lib/category-icons";
 import { colorForCategory } from "@/lib/category-colors";
 import { useTheme } from "@/components/theme-provider";
 import { DEUDA_ENABLED } from "@/lib/features";
+import {
+  getHomeHiddenSnapshot,
+  getHomeOrderSnapshot,
+  getServerHomeHidden,
+  getServerHomeOrder,
+  getServerSkipped,
+  getSkippedSnapshot,
+  subscribeHomeLayout,
+  writeHomeHidden,
+  writeHomeOrder,
+  type HomeSectionId,
+} from "@/lib/home-layout";
 import { homeNextAction } from "@/lib/nav";
 
 type CategorySummary = {
@@ -50,22 +62,6 @@ type LiveRate = {
   hint?: string;
 };
 
-type HomeSectionId =
-  | "gastos"
-  | "categorias"
-  | "ahorros"
-  | "hogar"
-  | "deuda"
-  | "cotizaciones";
-
-const SKIPPED_SERVICES_KEY = "lc:hogar-skipped-services";
-const HOME_ORDER_KEY = "lc:home-order";
-const HOME_HIDDEN_KEY = "lc:home-hidden";
-
-const DEFAULT_ORDER: HomeSectionId[] = DEUDA_ENABLED
-  ? ["gastos", "categorias", "ahorros", "hogar", "deuda", "cotizaciones"]
-  : ["gastos", "categorias", "ahorros", "hogar", "cotizaciones"];
-
 const SECTION_LABELS: Record<HomeSectionId, string> = {
   gastos: "Neta del mes",
   categorias: "Por categoría",
@@ -77,71 +73,6 @@ const SECTION_LABELS: Record<HomeSectionId, string> = {
 
 /** Full-width on desktop grid */
 const WIDE_SECTIONS = new Set<HomeSectionId>(["gastos", "cotizaciones"]);
-
-function loadSkippedServices(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(SKIPPED_SERVICES_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw) as string[];
-    return new Set(Array.isArray(arr) ? arr : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function loadOrder(): HomeSectionId[] {
-  if (typeof window === "undefined") return DEFAULT_ORDER;
-  try {
-    const raw = window.localStorage.getItem(HOME_ORDER_KEY);
-    if (!raw) return DEFAULT_ORDER;
-    const arr = JSON.parse(raw) as string[];
-    if (!Array.isArray(arr)) return DEFAULT_ORDER;
-    const valid = arr.filter((id): id is HomeSectionId =>
-      DEFAULT_ORDER.includes(id as HomeSectionId),
-    );
-    for (const id of DEFAULT_ORDER) {
-      if (!valid.includes(id)) valid.push(id);
-    }
-    return DEUDA_ENABLED ? valid : valid.filter((id) => id !== "deuda");
-  } catch {
-    return DEFAULT_ORDER;
-  }
-}
-
-function loadHidden(): Set<HomeSectionId> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const legacyDebt = window.localStorage.getItem("lc:home-show-debt");
-    const legacyHogar = window.localStorage.getItem("lc:home-show-hogar");
-    const raw = window.localStorage.getItem(HOME_HIDDEN_KEY);
-    let hidden = new Set<HomeSectionId>();
-    if (raw) {
-      const arr = JSON.parse(raw) as string[];
-      if (Array.isArray(arr)) {
-        for (const id of arr) {
-          if (DEFAULT_ORDER.includes(id as HomeSectionId)) {
-            hidden.add(id as HomeSectionId);
-          }
-        }
-      }
-    } else {
-      if (legacyDebt === "0" || legacyDebt === "false") hidden.add("deuda");
-      if (legacyHogar === "0" || legacyHogar === "false") hidden.add("hogar");
-    }
-    return hidden;
-  } catch {
-    return new Set();
-  }
-}
-
-function saveOrder(order: HomeSectionId[]) {
-  window.localStorage.setItem(HOME_ORDER_KEY, JSON.stringify(order));
-}
-
-function saveHidden(hidden: Set<HomeSectionId>) {
-  window.localStorage.setItem(HOME_HIDDEN_KEY, JSON.stringify([...hidden]));
-}
 
 function formatRate(n: number) {
   return new Intl.NumberFormat("es-AR", {
@@ -583,25 +514,26 @@ export function DashboardHome({
   initialMembers?: unknown;
 }) {
   const router = useRouter();
-  const [liveTotal, setLiveTotal] = useState(totalArs);
-  const [liveCats, setLiveCats] = useState(categorySummary);
+  const liveTotal = totalArs;
+  const liveCats = categorySummary;
   const [burst, setBurst] = useState(false);
   const [pop, setPop] = useState(false);
-  const [skipped, setSkipped] = useState<Set<string>>(() => new Set());
-  const [order, setOrder] = useState<HomeSectionId[]>(DEFAULT_ORDER);
-  const [hidden, setHidden] = useState<Set<HomeSectionId>>(() => new Set());
+  const skipped = useSyncExternalStore(
+    subscribeHomeLayout,
+    getSkippedSnapshot,
+    getServerSkipped,
+  );
+  const order = useSyncExternalStore(
+    subscribeHomeLayout,
+    getHomeOrderSnapshot,
+    getServerHomeOrder,
+  );
+  const hidden = useSyncExternalStore(
+    subscribeHomeLayout,
+    getHomeHiddenSnapshot,
+    getServerHomeHidden,
+  );
   const [editing, setEditing] = useState(false);
-
-  useEffect(() => {
-    setSkipped(loadSkippedServices());
-    setOrder(loadOrder());
-    setHidden(loadHidden());
-  }, []);
-
-  useEffect(() => {
-    setLiveTotal(totalArs);
-    setLiveCats(categorySummary);
-  }, [totalArs, categorySummary]);
 
   const displayTotal = useCountUp(liveTotal, 750);
   const hasIncomes = incomeArs > 0;
@@ -632,10 +564,8 @@ export function DashboardHome({
     nextOrder: HomeSectionId[],
     nextHidden: Set<HomeSectionId>,
   ) {
-    setOrder(nextOrder);
-    setHidden(nextHidden);
-    saveOrder(nextOrder);
-    saveHidden(nextHidden);
+    writeHomeOrder(nextOrder);
+    writeHomeHidden(nextHidden);
   }
 
   const next = homeNextAction(monthTxCount);
@@ -913,7 +843,6 @@ export function DashboardHome({
     debtBalanceArs,
     liveRates,
     period,
-    monthTxCount,
     next,
     emptyMonth,
   ]);

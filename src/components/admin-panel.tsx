@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { isAbortError, readJson } from "@/hooks/use-json-resource";
 import { FiwindReclassifyAction } from "@/components/fiwind-reclassify-action";
 
 type AllowedRow = {
@@ -16,31 +17,28 @@ export function AdminPanel({ readOnly = false }: { readOnly?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await fetch("/api/admin/allowed-emails", {
-        credentials: "include",
-      });
-      const data = (await res.json().catch(() => null)) as {
-        emails?: AllowedRow[];
-        error?: string;
-      } | null;
-      if (!res.ok) {
-        setError(data?.error || `Error ${res.status}`);
-        return;
-      }
-      setEmails(data?.emails ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error de red");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    const ac = new AbortController();
+    fetch("/api/admin/allowed-emails", {
+      credentials: "include",
+      signal: ac.signal,
+    })
+      .then((res) =>
+        readJson<{ emails?: AllowedRow[] }>(res, `Error ${res.status}`),
+      )
+      .then((data) => {
+        if (ac.signal.aborted) return;
+        setEmails(data.emails ?? []);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted || isAbortError(e)) return;
+        setError(e instanceof Error ? e.message : "Error de red");
+        setLoading(false);
+      });
+    return () => ac.abort();
+  }, []);
 
   async function addEmail(e: React.FormEvent) {
     e.preventDefault();

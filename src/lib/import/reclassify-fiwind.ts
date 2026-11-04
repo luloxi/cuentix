@@ -296,7 +296,7 @@ export async function reclassifyFiwindNoise(
         amountUsd: inc.amountUsd != null ? n(inc.amountUsd) : null,
       });
 
-      let matched =
+      const matched =
         byFp.get(fp) ??
         txRows.find(
           (t) =>

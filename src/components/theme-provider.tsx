@@ -6,13 +6,18 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
 } from "react";
+import {
+  THEME_STORAGE_KEY,
+  parseStoredTheme,
+  resolveTheme,
+  toggledTheme,
+  type ResolvedTheme,
+  type ThemeMode,
+} from "@/lib/theme-mode";
 
-export type ThemeMode = "light" | "dark" | "system";
-export type ResolvedTheme = "light" | "dark";
-
-const STORAGE_KEY = "lc-theme";
+export type { ResolvedTheme, ThemeMode };
 
 type ThemeContextValue = {
   mode: ThemeMode;
@@ -23,11 +28,53 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function getSystemTheme(): ResolvedTheme {
-  if (typeof window === "undefined") return "light";
+function subscribeTheme(onChange: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === THEME_STORAGE_KEY || event.key == null) onChange();
+  };
+  window.addEventListener("storage", onStorage);
+  window.addEventListener("lc:theme", onChange);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener("lc:theme", onChange);
+  };
+}
+
+function readThemeMode(): ThemeMode {
+  try {
+    return parseStoredTheme(localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return "system";
+  }
+}
+
+function serverThemeMode(): ThemeMode {
+  return "system";
+}
+
+function subscribeSystem(onChange: () => void) {
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
+function readSystemTheme(): ResolvedTheme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
     : "light";
+}
+
+function serverSystemTheme(): ResolvedTheme {
+  return "light";
+}
+
+function persistTheme(mode: ThemeMode) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+  window.dispatchEvent(new Event("lc:theme"));
 }
 
 function applyResolved(resolved: ResolvedTheme) {
@@ -38,69 +85,34 @@ function applyResolved(resolved: ResolvedTheme) {
   // Keep iOS status bar / theme-color roughly in sync
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) {
-    meta.setAttribute(
-      "content",
-      resolved === "dark" ? "#121110" : "#f7f6f3",
-    );
+    meta.setAttribute("content", resolved === "dark" ? "#121110" : "#f7f6f3");
   }
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>("system");
-  const [resolved, setResolved] = useState<ResolvedTheme>("light");
-  const [ready, setReady] = useState(false);
+  const mode = useSyncExternalStore(
+    subscribeTheme,
+    readThemeMode,
+    serverThemeMode,
+  );
+  const system = useSyncExternalStore(
+    subscribeSystem,
+    readSystemTheme,
+    serverSystemTheme,
+  );
+  const resolved = resolveTheme(mode, system);
 
   useEffect(() => {
-    let initial: ThemeMode = "system";
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
-      if (stored === "light" || stored === "dark" || stored === "system") {
-        initial = stored;
-      }
-    } catch {
-      /* ignore */
-    }
-    setModeState(initial);
-    const r = initial === "system" ? getSystemTheme() : initial;
-    setResolved(r);
-    applyResolved(r);
-    setReady(true);
+    applyResolved(resolved);
+  }, [resolved]);
+
+  const setMode = useCallback((next: ThemeMode) => {
+    persistTheme(next);
   }, []);
-
-  useEffect(() => {
-    if (!ready) return;
-    const r = mode === "system" ? getSystemTheme() : mode;
-    setResolved(r);
-    applyResolved(r);
-    try {
-      localStorage.setItem(STORAGE_KEY, mode);
-    } catch {
-      /* ignore */
-    }
-  }, [mode, ready]);
-
-  useEffect(() => {
-    if (mode !== "system") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => {
-      const r = getSystemTheme();
-      setResolved(r);
-      applyResolved(r);
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [mode]);
-
-  const setMode = useCallback((m: ThemeMode) => setModeState(m), []);
 
   const toggle = useCallback(() => {
-    setModeState((prev) => {
-      // Cycle based on what the user actually sees
-      const current =
-        prev === "system" ? getSystemTheme() : prev;
-      return current === "dark" ? "light" : "dark";
-    });
-  }, []);
+    persistTheme(toggledTheme(mode, system));
+  }, [mode, system]);
 
   const value = useMemo(
     () => ({ mode, resolved, setMode, toggle }),

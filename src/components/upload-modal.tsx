@@ -5,7 +5,7 @@ import { Loader2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { filesFromDrop } from "@/lib/import/file-accept";
 
-export function UploadModal({
+function UploadDialog({
   open,
   title,
   description,
@@ -34,15 +34,6 @@ export function UploadModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      setDragOver(false);
-      setLoading(false);
-      setError(null);
-      setFileName(null);
-    }
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -223,4 +214,19 @@ export function UploadModal({
       </div>
     </div>
   );
+}
+
+export function UploadModal(props: {
+  open: boolean;
+  title: string;
+  description: string;
+  accept: string;
+  processingLabel?: string;
+  multiple?: boolean;
+  onClose: () => void;
+  onFile?: (file: File) => Promise<void>;
+  onFiles?: (files: File[]) => Promise<void>;
+}) {
+  if (!props.open) return null;
+  return <UploadDialog {...props} />;
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useJsonResource } from "@/hooks/use-json-resource";
 import { LineChart, Trash2 } from "lucide-react";
 import { TotalSpendChart } from "@/components/spend-charts";
 import {
@@ -58,14 +59,27 @@ export function IngresosView() {
     [period, fallback],
   );
 
-  const [rows, setRows] = useState<IncomeRow[]>([]);
-  const [periodEntries, setPeriodEntries] = useState<PeriodIncomeEntry[]>([]);
-  const [monthlyEvolution, setMonthlyEvolution] = useState<
-    Array<{ period: string; amountArs: number }>
-  >([]);
-  const [loading, setLoading] = useState(true);
+  const resource = useJsonResource<{
+    incomes?: IncomeRow[];
+    periodEntries?: PeriodIncomeEntry[];
+    monthlyEvolution?: Array<{ period: string; amountArs: number }>;
+  }>(`/api/incomes?period=${encodeURIComponent(period)}`, [period], {
+    fallbackError: "Error",
+    networkError: "Error de red",
+  });
+  const rows = useMemo(() => resource.data?.incomes ?? [], [resource.data?.incomes]);
+  const periodEntries = useMemo(
+    () => resource.data?.periodEntries ?? [],
+    [resource.data?.periodEntries],
+  );
+  const monthlyEvolution = useMemo(
+    () => resource.data?.monthlyEvolution ?? [],
+    [resource.data?.monthlyEvolution],
+  );
+  const loading = resource.loading;
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? resource.error;
   const [ok, setOk] = useState<string | null>(null);
   const [mode, setMode] = useState<FormMode>("recurring");
 
@@ -75,37 +89,14 @@ export function IngresosView() {
   const [amountUsd, setAmountUsd] = useState("");
   const [frequency, setFrequency] = useState<IncomeFrequency>("mensual");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/incomes?period=${encodeURIComponent(period)}`,
-        { credentials: "include" },
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error");
-      setRows(data.incomes ?? []);
-      setPeriodEntries(data.periodEntries ?? []);
-      setMonthlyEvolution(data.monthlyEvolution ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error de red");
-    } finally {
-      setLoading(false);
-    }
-  }, [period]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
+  const { reload } = resource;
   useEffect(() => {
     function onSwitch() {
-      void load();
+      void reload();
     }
     window.addEventListener("lc:household-switched", onSwitch);
     return () => window.removeEventListener("lc:household-switched", onSwitch);
-  }, [load]);
+  }, [reload]);
 
   function onPeriodChange(next: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -127,7 +118,7 @@ export function IngresosView() {
 
   async function submit() {
     setSaving(true);
-    setError(null);
+    setActionError(null);
     setOk(null);
     try {
       const ars = amountArs.trim() ? Number(amountArs.replace(",", ".")) : null;
@@ -155,16 +146,16 @@ export function IngresosView() {
           ? "Sueldo recurrente guardado"
           : "Ingreso variable guardado",
       );
-      await load();
+      await resource.reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
+      setActionError(e instanceof Error ? e.message : "Error");
     } finally {
       setSaving(false);
     }
   }
 
   async function remove(id: string) {
-    setError(null);
+    setActionError(null);
     try {
       const res = await fetch(`/api/incomes?id=${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -172,9 +163,9 @@ export function IngresosView() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error");
-      await load();
+      await resource.reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
+      setActionError(e instanceof Error ? e.message : "Error");
     }
   }
 

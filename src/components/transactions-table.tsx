@@ -7,6 +7,8 @@ import {
 import * as XLSX from "xlsx";
 import { formatArs, cn, currentPeriodAr, periodFromDateString } from "@/lib/utils";
 import { formatPeriodLabel } from "@/lib/period-label";
+import { isAbortError } from "@/hooks/use-json-resource";
+import { nextPage } from "@/lib/list-page";
 import { EmptyState, ListSkeleton, Toast } from "@/components/ui";
 import {
   ApplyCriterionToast,
@@ -130,6 +132,34 @@ function nextAmountOnBlur(
   if (Number.isNaN(n)) return undefined;
   return n;
 }
+type TxPayload = {
+  error?: string;
+  transactions?: Tx[];
+  categories?: Category[];
+  members?: Member[];
+  total?: number;
+  periods?: string[];
+  iogCount?: number;
+};
+
+function normalizeTxPayload(data: TxPayload) {
+  const list = (data.transactions ?? []).map((t) => ({
+    ...t,
+    ownership: t.ownership === "shared" ? ("shared" as const) : ("personal" as const),
+    reintegroHogar: Boolean(t.reintegroHogar),
+    reintegroPayee: Boolean(t.reintegroPayee),
+    revisar: Boolean(t.revisar),
+  }));
+  return {
+    list,
+    total: data.total ?? list.length,
+    iog: data.iogCount ?? 0,
+    categories: data.categories ?? [],
+    members: data.members ?? [],
+    periods: data.periods ?? [],
+  };
+}
+
 async function parseJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) throw new Error(res.ok ? "Respuesta vacía" : `Error ${res.status}`);
@@ -137,6 +167,31 @@ async function parseJson<T>(res: Response): Promise<T> {
   catch {
     throw new Error(`Respuesta inválida (${res.status})`);
   }
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-2.5 py-1 text-xs font-medium transition",
+        active
+          ? "border-[var(--brand)]/40 bg-[var(--brand-soft)] text-[var(--brand-fg)]"
+          : "border-[var(--border)] text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]",
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 function downloadBlob(filename: string, blob: Blob) {
@@ -292,29 +347,15 @@ export function TransactionsTable() {
     const params = queryFor(pageSize, (page - 1) * pageSize);
     try {
       const res = await fetch(`/api/transactions?${params}`, { credentials: "include" });
-      const data = await parseJson<{
-        error?: string;
-        transactions?: Tx[];
-        categories?: Category[];
-        members?: Member[];
-        total?: number;
-        periods?: string[];
-        iogCount?: number;
-      }>(res);
+      const data = await parseJson<TxPayload>(res);
       if (!res.ok) { setError(data.error || `Error ${res.status}`); return; }
-      const list = (data.transactions ?? []).map((t) => ({
-        ...t,
-        ownership: t.ownership === "shared" ? "shared" as const : "personal" as const,
-        reintegroHogar: Boolean(t.reintegroHogar),
-        reintegroPayee: Boolean(t.reintegroPayee),
-        revisar: Boolean(t.revisar),
-      }));
-      setRows(list);
-      setTotalCount(data.total ?? list.length);
-      setIogTotal(data.iogCount ?? 0);
-      setCategories(data.categories ?? []);
-      setMembers(data.members ?? []);
-      if (data.periods?.length) setAllPeriods(data.periods);
+      const next = normalizeTxPayload(data);
+      setRows(next.list);
+      setTotalCount(next.total);
+      setIogTotal(next.iog);
+      setCategories(next.categories);
+      setMembers(next.members);
+      if (next.periods.length) setAllPeriods(next.periods);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error de red");
     } finally {
@@ -322,7 +363,41 @@ export function TransactionsTable() {
     }
   }, [queryFor, page, pageSize]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const ac = new AbortController();
+    const params = queryFor(pageSize, (page - 1) * pageSize);
+    fetch(`/api/transactions?${params}`, {
+      credentials: "include",
+      signal: ac.signal,
+    })
+      .then(async (res) => {
+        const data = await parseJson<TxPayload>(res);
+        return { ok: res.ok, status: res.status, data };
+      })
+      .then((result) => {
+        if (ac.signal.aborted) return;
+        if (!result.ok) {
+          setError(result.data.error || `Error ${result.status}`);
+          setLoading(false);
+          return;
+        }
+        const next = normalizeTxPayload(result.data);
+        setRows(next.list);
+        setTotalCount(next.total);
+        setIogTotal(next.iog);
+        setCategories(next.categories);
+        setMembers(next.members);
+        if (next.periods.length) setAllPeriods(next.periods);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted || isAbortError(e)) return;
+        setError(e instanceof Error ? e.message : "Error de red");
+        setLoading(false);
+      });
+    return () => ac.abort();
+  }, [queryFor, page, pageSize]);
 
   useEffect(() => {
     function onCreated() {
@@ -336,10 +411,25 @@ export function TransactionsTable() {
   const sorted = rows;
   const pageRows = rows;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const safePage = Math.min(page, totalPages);
-
-  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
-  useEffect(() => { setPage(1); }, [period, q, ownershipF, categoryF, ticketF, currencyF, iogOnly]);
+  const filterKey = `${period}\0${q}\0${ownershipF}\0${categoryF}\0${ticketF}\0${currencyF}\0${iogOnly}`;
+  const [seenFilter, setSeenFilter] = useState(filterKey);
+  const [seenTxQuery, setSeenTxQuery] = useState<string | null>(null);
+  const pageNow = nextPage({
+    filterChanged: filterKey !== seenFilter,
+    page,
+    totalPages,
+  });
+  if (filterKey !== seenFilter) setSeenFilter(filterKey);
+  if (pageNow !== page) setPage(pageNow);
+  const txQueryKey = `${filterKey}\0${pageNow}\0${pageSize}`;
+  if (txQueryKey !== seenTxQuery) {
+    setSeenTxQuery(txQueryKey);
+    if (seenTxQuery !== null) {
+      setLoading(true);
+      setError(null);
+    }
+  }
+  const safePage = Math.min(pageNow, totalPages);
 
   async function patch(id: string, body: Record<string, unknown>) {
     setError(null); setSavingId(id);
@@ -882,31 +972,6 @@ export function TransactionsTable() {
     }
   }
 
-  function Chip({
-    active,
-    onClick,
-    children,
-  }: {
-    active: boolean;
-    onClick: () => void;
-    children: React.ReactNode;
-  }) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className={cn(
-          "rounded-full border px-2.5 py-1 text-xs font-medium transition",
-          active
-            ? "border-[var(--brand)]/40 bg-[var(--brand-soft)] text-[var(--brand-fg)]"
-            : "border-[var(--border)] text-[var(--muted-fg)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]",
-        )}
-      >
-        {children}
-      </button>
-    );
-  }
-
   return (
     <div className="space-y-3">
       <div className="flex w-full items-center gap-2">
@@ -993,21 +1058,21 @@ export function TransactionsTable() {
                 <div>
                   <p className="mb-1.5 text-[11px] font-semibold text-zinc-500">Tipo</p>
                   <div className="flex flex-wrap gap-1.5">
-                    <Chip active={ownershipF === "all"} onClick={() => setOwnershipF("all")}>Todos</Chip>
-                    <Chip active={ownershipF === "personal"} onClick={() => setOwnershipF("personal")}>Personal</Chip>
-                    <Chip active={ownershipF === "shared"} onClick={() => setOwnershipF("shared")}>Hogar</Chip>
+                    <FilterChip active={ownershipF === "all"} onClick={() => setOwnershipF("all")}>Todos</FilterChip>
+                    <FilterChip active={ownershipF === "personal"} onClick={() => setOwnershipF("personal")}>Personal</FilterChip>
+                    <FilterChip active={ownershipF === "shared"} onClick={() => setOwnershipF("shared")}>Hogar</FilterChip>
                   </div>
                 </div>
 
                 <div>
                   <p className="mb-1.5 text-[11px] font-semibold text-zinc-500">Categoría</p>
                   <div className="flex flex-wrap gap-1.5">
-                    <Chip active={categoryF === "all"} onClick={() => setCategoryF("all")}>Todas</Chip>
-                    <Chip active={categoryF === "uncategorized"} onClick={() => setCategoryF("uncategorized")}>Sin categoría</Chip>
+                    <FilterChip active={categoryF === "all"} onClick={() => setCategoryF("all")}>Todas</FilterChip>
+                    <FilterChip active={categoryF === "uncategorized"} onClick={() => setCategoryF("uncategorized")}>Sin categoría</FilterChip>
                     {catOptions.map((c) => (
-                      <Chip key={c.id} active={categoryF === c.id} onClick={() => setCategoryF(c.id)}>
+                      <FilterChip key={c.id} active={categoryF === c.id} onClick={() => setCategoryF(c.id)}>
                         {categoryLabel(c.name)}
-                      </Chip>
+                      </FilterChip>
                     ))}
                   </div>
                 </div>
@@ -1015,18 +1080,18 @@ export function TransactionsTable() {
                 <div>
                   <p className="mb-1.5 text-[11px] font-semibold text-zinc-500">Origen</p>
                   <div className="flex flex-wrap gap-1.5">
-                    <Chip active={ticketF === "all"} onClick={() => setTicketF("all")}>Todos</Chip>
-                    <Chip active={ticketF === "ticket"} onClick={() => setTicketF("ticket")}>Con ticket</Chip>
-                    <Chip active={ticketF === "no-ticket"} onClick={() => setTicketF("no-ticket")}>Sin ticket</Chip>
+                    <FilterChip active={ticketF === "all"} onClick={() => setTicketF("all")}>Todos</FilterChip>
+                    <FilterChip active={ticketF === "ticket"} onClick={() => setTicketF("ticket")}>Con ticket</FilterChip>
+                    <FilterChip active={ticketF === "no-ticket"} onClick={() => setTicketF("no-ticket")}>Sin ticket</FilterChip>
                   </div>
                 </div>
 
                 <div>
                   <p className="mb-1.5 text-[11px] font-semibold text-zinc-500">Moneda</p>
                   <div className="flex flex-wrap gap-1.5">
-                    <Chip active={currencyF === "all"} onClick={() => setCurrencyF("all")}>Todas</Chip>
-                    <Chip active={currencyF === "ars"} onClick={() => setCurrencyF("ars")}>Pesos</Chip>
-                    <Chip active={currencyF === "usd"} onClick={() => setCurrencyF("usd")}>Dólares</Chip>
+                    <FilterChip active={currencyF === "all"} onClick={() => setCurrencyF("all")}>Todas</FilterChip>
+                    <FilterChip active={currencyF === "ars"} onClick={() => setCurrencyF("ars")}>Pesos</FilterChip>
+                    <FilterChip active={currencyF === "usd"} onClick={() => setCurrencyF("usd")}>Dólares</FilterChip>
                   </div>
                 </div>
 
@@ -1034,8 +1099,8 @@ export function TransactionsTable() {
                   <div>
                     <p className="mb-1.5 text-[11px] font-semibold text-zinc-500">Invoice IOG</p>
                     <div className="flex flex-wrap gap-1.5">
-                      <Chip active={!iogOnly} onClick={() => setIogOnly(false)}>Todos</Chip>
-                      <Chip active={iogOnly} onClick={() => setIogOnly(true)}>Solo IOG</Chip>
+                      <FilterChip active={!iogOnly} onClick={() => setIogOnly(false)}>Todos</FilterChip>
+                      <FilterChip active={iogOnly} onClick={() => setIogOnly(true)}>Solo IOG</FilterChip>
                     </div>
                   </div>
                 )}

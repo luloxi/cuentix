@@ -1,3 +1,4 @@
+import { createElement } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   ShoppingCart,
@@ -88,6 +89,9 @@ export function CategoryIcon({
   className?: string;
   size?: number;
 }) {
-  const Icon = iconForCategory(slug);
-  return <Icon className={className} size={size} strokeWidth={2} />;
+  return createElement(iconForCategory(slug), {
+    className,
+    size,
+    strokeWidth: 2,
+  });
 }
