@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useJsonResource } from "@/hooks/use-json-resource";
 import { useRouter } from "next/navigation";
 import { Home, Receipt, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,40 +26,34 @@ function iconFor(name: string) {
 
 export function HouseholdSwitcher({ variant = "page", className }: Props) {
   const router = useRouter();
-  const [households, setHouseholds] = useState<HouseholdOption[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const resource = useJsonResource<{
+    households?: HouseholdOption[];
+    activeHouseholdId?: string | null;
+  }>("/api/household/active", [], {
+    fallbackError: "Error",
+    networkError: "Error de red",
+  });
+  const [override, setOverride] = useState<{
+    households: HouseholdOption[];
+    activeHouseholdId: string | null;
+  } | null>(null);
+  const [seen, setSeen] = useState(resource.data);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/household/active", {
-        credentials: "include",
-      });
-      const data = (await res.json().catch(() => null)) as {
-        households?: HouseholdOption[];
-        activeHouseholdId?: string | null;
-        error?: string;
-      } | null;
-      if (!res.ok) {
-        setError(data?.error || `Error ${res.status}`);
-        return;
-      }
-      setHouseholds(data?.households ?? []);
-      setActiveId(data?.activeHouseholdId ?? null);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error de red");
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const [actionError, setActionError] = useState<string | null>(null);
+  if (resource.data !== seen) {
+    setSeen(resource.data);
+    setOverride(null);
+    setActionError(null);
+  }
+  const households = override?.households ?? resource.data?.households ?? [];
+  const activeId =
+    override?.activeHouseholdId ?? resource.data?.activeHouseholdId ?? null;
+  const error = actionError ?? (override ? null : resource.error);
+  const reloadHouseholds = resource.reload;
 
   useEffect(() => {
     function onHouseholdChange() {
-      void load();
+      void reloadHouseholds();
     }
     window.addEventListener("lc:household-switched", onHouseholdChange);
     window.addEventListener("lc:household-created", onHouseholdChange);
@@ -66,12 +61,12 @@ export function HouseholdSwitcher({ variant = "page", className }: Props) {
       window.removeEventListener("lc:household-switched", onHouseholdChange);
       window.removeEventListener("lc:household-created", onHouseholdChange);
     };
-  }, [load]);
+  }, [reloadHouseholds]);
 
   async function switchTo(householdId: string) {
     if (!householdId || householdId === activeId || busy) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       const res = await fetch("/api/household/active", {
         method: "POST",
@@ -84,15 +79,18 @@ export function HouseholdSwitcher({ variant = "page", className }: Props) {
         activeHouseholdId?: string;
       } | null;
       if (!res.ok) {
-        setError(data?.error || `Error ${res.status}`);
+        setActionError(data?.error || `Error ${res.status}`);
         return;
       }
-      setActiveId(data?.activeHouseholdId ?? householdId);
+      setOverride({
+        households,
+        activeHouseholdId: data?.activeHouseholdId ?? householdId,
+      });
       router.refresh();
       // Reload client data that depends on the active hogar cookie.
       window.dispatchEvent(new Event("lc:household-switched"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error de red");
+      setActionError(e instanceof Error ? e.message : "Error de red");
     } finally {
       setBusy(false);
     }
@@ -105,7 +103,7 @@ export function HouseholdSwitcher({ variant = "page", className }: Props) {
     );
     if (!ok) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       const res = await fetch("/api/household/active", {
         method: "POST",
@@ -119,15 +117,17 @@ export function HouseholdSwitcher({ variant = "page", className }: Props) {
         activeHouseholdId?: string | null;
       } | null;
       if (!res.ok) {
-        setError(data?.error || `Error ${res.status}`);
+        setActionError(data?.error || `Error ${res.status}`);
         return;
       }
-      setHouseholds(data?.households ?? []);
-      setActiveId(data?.activeHouseholdId ?? null);
+      setOverride({
+        households: data?.households ?? [],
+        activeHouseholdId: data?.activeHouseholdId ?? null,
+      });
       router.refresh();
       window.dispatchEvent(new Event("lc:household-switched"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error de red");
+      setActionError(e instanceof Error ? e.message : "Error de red");
     } finally {
       setBusy(false);
     }

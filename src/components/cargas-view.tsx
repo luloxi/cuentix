@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useJsonResource } from "@/hooks/use-json-resource";
 import {
   FileSpreadsheet,
   Loader2,
@@ -50,29 +51,17 @@ function KindIcon({ kind }: { kind: CargaItem["kind"] }) {
 }
 
 export function CargasView() {
-  const [items, setItems] = useState<CargaItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data,
+    error,
+    loading,
+    reload: load,
+  } = useJsonResource<{ items?: CargaItem[] }>("/api/cargas", [], {
+    fallbackError: "No se pudieron cargar las cargas",
+    networkError: "Error",
+  });
+  const items = useMemo(() => data?.items ?? [], [data?.items]);
   const [filter, setFilter] = useState<Filter>("all");
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/cargas", { credentials: "include" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "No se pudieron cargar las cargas");
-      setItems(data.items ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   const filtered = useMemo(() => {
     if (filter === "all") return items;

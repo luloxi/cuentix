@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   formatArs,
@@ -16,6 +16,13 @@ import { HouseholdSwitcher } from "@/components/household-switcher";
 import { CreateHouseholdButton } from "@/components/create-household";
 import { CategoryIcon } from "@/lib/category-icons";
 import { colorForCategory } from "@/lib/category-colors";
+import {
+  getServerSkipped,
+  getSkippedSnapshot,
+  subscribeHomeLayout,
+  writeSkipped,
+} from "@/lib/home-layout";
+import { isAbortError } from "@/hooks/use-json-resource";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -81,28 +88,6 @@ const FIXED_SERVICES: Array<{ slug: string; name: string }> = [
   { slug: "internet", name: "Internet" },
 ];
 
-const SKIPPED_SERVICES_KEY = "lc:hogar-skipped-services";
-
-function loadSkippedServices(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(SKIPPED_SERVICES_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw) as string[];
-    return new Set(Array.isArray(arr) ? arr : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveSkippedServices(set: Set<string>) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(
-    SKIPPED_SERVICES_KEY,
-    JSON.stringify([...set]),
-  );
-}
-
 function tabFromParam(raw: string | null): ViewTab {
   return raw === "charts" ? "charts" : "vista";
 }
@@ -119,9 +104,13 @@ function periodOfDate(date: string): string {
 export function CompartidoView() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [viewTab, setViewTab] = useState<ViewTab>(() =>
-    tabFromParam(searchParams.get("tab")),
-  );
+  const urlTab = tabFromParam(searchParams.get("tab"));
+  const [viewTab, setViewTab] = useState<ViewTab>(urlTab);
+  const [seenTab, setSeenTab] = useState(urlTab);
+  if (urlTab !== seenTab) {
+    setSeenTab(urlTab);
+    setViewTab(urlTab);
+  }
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<Cat[]>([]);
   const [periods, setPeriods] = useState<string[]>([]);
@@ -141,15 +130,18 @@ export function CompartidoView() {
   const [ticketOpen, setTicketOpen] = useState<Set<string>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
   const [servicesOpen, setServicesOpen] = useState(false);
-  const [skipped, setSkipped] = useState<Set<string>>(() => new Set());
-
-  useEffect(() => {
-    setSkipped(loadSkippedServices());
-  }, []);
-
-  useEffect(() => {
-    setViewTab(tabFromParam(searchParams.get("tab")));
-  }, [searchParams]);
+  const skipped = useSyncExternalStore(
+    subscribeHomeLayout,
+    getSkippedSnapshot,
+    getServerSkipped,
+  );
+  const requestKey = `${period}\0${reloadKey}`;
+  const [seenRequest, setSeenRequest] = useState(requestKey);
+  if (requestKey !== seenRequest) {
+    setSeenRequest(requestKey);
+    setLoading(true);
+    setError(null);
+  }
 
   const onViewTab = useCallback(
     (v: ViewTab) => {
@@ -159,39 +151,43 @@ export function CompartidoView() {
     [router],
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const q =
-        period === "all"
-          ? "?period=all"
-          : `?period=${encodeURIComponent(period)}`;
-      const res = await fetch(`/api/stats/compartido${q}`, {
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error");
-      setExpenses(data.expenses ?? []);
-      setCategories(data.categories ?? []);
-      setPeriods(data.periods ?? []);
-      setMembers(data.members ?? []);
-      setInviteCode(data.inviteCode ?? "");
-      setHouseholdName(data.householdName ?? "");
-      setPrevPeriod(data.prevPeriod ?? null);
-      setPrevTotalArs(data.prevTotalArs ?? 0);
-      setTotal(data.summary?.totalArsCombined ?? 0);
-      setExpenseCount(data.summary?.expenseCount ?? 0);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error de red");
-    } finally {
-      setLoading(false);
-    }
-  }, [period]);
-
   useEffect(() => {
-    void load();
-  }, [load, reloadKey]);
+    const ac = new AbortController();
+    const q =
+      period === "all"
+        ? "?period=all"
+        : `?period=${encodeURIComponent(period)}`;
+    fetch(`/api/stats/compartido${q}`, {
+      credentials: "include",
+      signal: ac.signal,
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Error");
+        return data;
+      })
+      .then((data) => {
+        if (ac.signal.aborted) return;
+        setExpenses(data.expenses ?? []);
+        setCategories(data.categories ?? []);
+        setPeriods(data.periods ?? []);
+        setMembers(data.members ?? []);
+        setInviteCode(data.inviteCode ?? "");
+        setHouseholdName(data.householdName ?? "");
+        setPrevPeriod(data.prevPeriod ?? null);
+        setPrevTotalArs(data.prevTotalArs ?? 0);
+        setTotal(data.summary?.totalArsCombined ?? 0);
+        setExpenseCount(data.summary?.expenseCount ?? 0);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted || isAbortError(e)) return;
+        setError(e instanceof Error ? e.message : "Error de red");
+        setLoading(false);
+      });
+    return () => ac.abort();
+  }, [period, reloadKey]);
 
   useEffect(() => {
     function onCreated() {
@@ -261,13 +257,10 @@ export function CompartidoView() {
   }
 
   function toggleSkipped(slug: string) {
-    setSkipped((prev) => {
-      const next = new Set(prev);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
-      saveSkippedServices(next);
-      return next;
-    });
+    const next = new Set(skipped);
+    if (next.has(slug)) next.delete(slug);
+    else next.add(slug);
+    writeSkipped(next);
   }
 
   /** Checklist period: selected month, or current month when viewing "all". */

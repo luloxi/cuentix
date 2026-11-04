@@ -37,6 +37,8 @@ import {
 } from "@/lib/reintegro-hogar";
 import { isGastoCubiertoTipo } from "@/lib/gasto-cubierto";
 import { isTransferenciaInternaTipo } from "@/lib/bbva/bank-entries";
+import { isAbortError } from "@/hooks/use-json-resource";
+import { pickFilterPeriod } from "@/lib/list-page";
 
 type CategoryOpt = { id: string; slug: string; name: string };
 
@@ -303,13 +305,9 @@ export function MesAMesView({
       setChart(data.chart ?? null);
       setCategories(data.categories ?? []);
 
-      setFilterPeriod((prev) => {
-        if (prev !== "all" && loadedPeriods.includes(prev)) return prev;
-        const now = currentPeriodAr();
-        if (loadedPeriods.includes(now)) return now;
-        if (loadedPeriods.length > 0) return loadedPeriods[0]!;
-        return now;
-      });
+      setFilterPeriod((prev) =>
+        pickFilterPeriod(prev, loadedPeriods, currentPeriodAr()),
+      );
       setPeriodReady(true);
     } catch {
       setError("Error de red");
@@ -318,9 +316,77 @@ export function MesAMesView({
     }
   }, [ownershipF]);
 
+  const statsKey = ownershipF;
+  const [seenStatsKey, setSeenStatsKey] = useState(statsKey);
+  if (statsKey !== seenStatsKey) {
+    setSeenStatsKey(statsKey);
+    setLoading(true);
+    setError(null);
+  }
+
+  const txKey = `${mode}\0${periodReady ? filterPeriod : ""}`;
+  const [seenTxKey, setSeenTxKey] = useState(txKey);
+  if (txKey !== seenTxKey) {
+    setSeenTxKey(txKey);
+    if (mode !== "resumen") setTxs([]);
+    if (mode === "resumen" && periodReady) {
+      setTxsLoading(true);
+      setExpanded(new Set());
+    }
+  }
+
   useEffect(() => {
-    void loadStats();
-  }, [loadStats]);
+    const ac = new AbortController();
+    const params = new URLSearchParams({ period: "all" });
+    if (ownershipF !== "all") params.set("ownership", ownershipF);
+    fetch(`/api/stats/mes-a-mes?${params}`, {
+      credentials: "include",
+      signal: ac.signal,
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) {
+          return {
+            ok: false as const,
+            message: (data.error || "Error al cargar el análisis") as string,
+          };
+        }
+        return {
+          ok: true as const,
+          data: data as {
+            periods?: string[];
+            months?: MonthBlock[];
+            chart?: ChartData | null;
+            categories?: CategoryOpt[];
+          },
+        };
+      })
+      .then((result) => {
+        if (ac.signal.aborted) return;
+        if (!result.ok) {
+          setError(result.message);
+          setLoading(false);
+          return;
+        }
+        const loadedPeriods = result.data.periods ?? [];
+        setPeriods(loadedPeriods);
+        setMonths(result.data.months ?? []);
+        setChart(result.data.chart ?? null);
+        setCategories(result.data.categories ?? []);
+        setFilterPeriod((prev) =>
+          pickFilterPeriod(prev, loadedPeriods, currentPeriodAr()),
+        );
+        setPeriodReady(true);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted || isAbortError(e)) return;
+        setError("Error de red");
+        setLoading(false);
+      });
+    return () => ac.abort();
+  }, [ownershipF]);
 
   useEffect(() => {
     if (!toast || applyPrompt || reintegroPrompt) return;
@@ -329,26 +395,25 @@ export function MesAMesView({
   }, [toast, applyPrompt, reintegroPrompt]);
 
   useEffect(() => {
-    if (mode !== "resumen" || !periodReady) {
-      if (mode !== "resumen") setTxs([]);
-      return;
-    }
-    let cancelled = false;
-    async function loadTxs() {
-      setTxsLoading(true);
-      try {
-        const q =
-          filterPeriod && filterPeriod !== "all"
-            ? `?period=${encodeURIComponent(filterPeriod)}`
-            : "";
-        const res = await fetch(`/api/transactions${q}`, {
-          credentials: "include",
-        });
+    if (mode !== "resumen" || !periodReady) return;
+    const ac = new AbortController();
+    const q =
+      filterPeriod && filterPeriod !== "all"
+        ? `?period=${encodeURIComponent(filterPeriod)}`
+        : "";
+    fetch(`/api/transactions${q}`, {
+      credentials: "include",
+      signal: ac.signal,
+    })
+      .then(async (res) => {
         const data = await res.json();
-        if (cancelled) return;
-        if (res.ok) {
+        return { ok: res.ok, data };
+      })
+      .then(({ ok, data }) => {
+        if (ac.signal.aborted) return;
+        if (ok) {
           setTxs(
-            (data.transactions as Tx[])
+            ((data.transactions ?? []) as Tx[])
               .filter(
                 (t) =>
                   !isConsumosHiddenPayment(
@@ -369,15 +434,13 @@ export function MesAMesView({
           );
           if (data.categories?.length) setCategories(data.categories);
         }
-      } finally {
-        if (!cancelled) setTxsLoading(false);
-      }
-    }
-    void loadTxs();
-    setExpanded(new Set());
-    return () => {
-      cancelled = true;
-    };
+        setTxsLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted || isAbortError(e)) return;
+        setTxsLoading(false);
+      });
+    return () => ac.abort();
   }, [mode, filterPeriod, periodReady]);
 
   const grand = useMemo(() => aggregateMonths(months), [months]);
@@ -1037,7 +1100,7 @@ export function MesAMesView({
       ) : (
         <p className="text-sm text-zinc-500">
           Sin movimientos en {formatPeriodLabel(filterPeriod)}. Elegí otro mes o
-          "Todos los meses".
+          &quot;Todos los meses&quot;.
         </p>
       )}
     </div>

@@ -98,7 +98,7 @@ function toIso(y: number, m: number, d: number): string | null {
   return `${y}-${pad2(m)}-${pad2(d)}`;
 }
 
-function expandTwoDigitYear(yy: number, now = new Date()): number {
+function expandTwoDigitYear(yy: number): number {
   // 00–39 → 2000–2039, 40–99 → 1940–1999 (tickets actuales casi siempre 00–39)
   if (yy >= 100) return yy;
   if (yy <= 39) return 2000 + yy;
@@ -151,7 +151,7 @@ export function normalizeReceiptDate(
       d = Number(dmy[1]);
       m = Number(dmy[2]);
       const yr = Number(dmy[3]);
-      y = yr < 100 ? expandTwoDigitYear(yr, now) : yr;
+      y = yr < 100 ? expandTwoDigitYear(yr) : yr;
     }
   }
 

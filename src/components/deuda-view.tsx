@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { isAbortError } from "@/hooks/use-json-resource";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn, formatArs, formatUsd, formatDateAr } from "@/lib/utils";
@@ -163,9 +164,13 @@ export function DeudaView() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<DebtTab>(() =>
-    tabFromParam(searchParams.get("tab")),
-  );
+  const urlTab = tabFromParam(searchParams.get("tab"));
+  const [tab, setTab] = useState<DebtTab>(urlTab);
+  const [seenTab, setSeenTab] = useState(urlTab);
+  if (urlTab !== seenTab) {
+    setSeenTab(urlTab);
+    setTab(urlTab);
+  }
   const [settings, setSettings] = useState<DebtSettings>({
     ratePct: null,
     minPaymentArs: null,
@@ -187,16 +192,47 @@ export function DeudaView() {
   const [pastCuotas, setPastCuotas] = useState<PastCuota[]>([]);
   const [cardStatus, setCardStatus] = useState<string | null>(null);
 
-  useEffect(() => {
-    setTab(tabFromParam(searchParams.get("tab")));
-  }, [searchParams]);
-
   const onTab = useCallback(
     (v: DebtTab) => {
       setTab(v);
       router.replace(`/deuda?tab=${v}`, { scroll: false });
     },
     [router],
+  );
+
+  const storeDeuda = useCallback(
+    (
+      data: {
+        payments?: PaymentRow[];
+        openInstallments?: OpenInstallment[];
+        openCharges?: OpenCharge[];
+        summary?: Summary | null;
+        statements?: PastStatement[];
+        pastInstallments?: PastCuota[];
+        cardStatus?: string | null;
+      },
+      settingsOk: boolean,
+      setData: { settings?: DebtSettings },
+    ) => {
+      setPayments(data.payments ?? []);
+      setOpenInstallments(data.openInstallments ?? []);
+      setOpenCharges(data.openCharges ?? []);
+      setSummary(data.summary ?? null);
+      setStatements(data.statements ?? []);
+      setPastCuotas(data.pastInstallments ?? []);
+      setCardStatus(data.cardStatus ?? null);
+      if (settingsOk && setData.settings) {
+        const s = setData.settings;
+        setSettings(s);
+        setRateInput(s.ratePct != null ? String(s.ratePct) : "");
+        setMinInput(s.minPaymentArs != null ? String(s.minPaymentArs) : "");
+        setDueInput(s.dueDay != null ? String(s.dueDay) : "");
+        setNotesInput(s.notes ?? "");
+        setSaldoArsInput(s.saldoDeudaArs != null ? String(s.saldoDeudaArs) : "");
+        setSaldoUsdInput(s.saldoDeudaUsd != null ? String(s.saldoDeudaUsd) : "");
+      }
+    },
+    [],
   );
 
   const load = useCallback(async () => {
@@ -209,38 +245,40 @@ export function DeudaView() {
       const data = await debtRes.json();
       if (!debtRes.ok) throw new Error(data.error || "Error");
       const setData = await setRes.json();
-      setPayments(data.payments ?? []);
-      setOpenInstallments(data.openInstallments ?? []);
-      setOpenCharges(data.openCharges ?? []);
-      setSummary(data.summary ?? null);
-      setStatements(data.statements ?? []);
-      setPastCuotas(data.pastInstallments ?? []);
-      setCardStatus(data.cardStatus ?? null);
-      if (setRes.ok && setData.settings) {
-        const s = setData.settings as DebtSettings;
-        setSettings(s);
-        setRateInput(s.ratePct != null ? String(s.ratePct) : "");
-        setMinInput(s.minPaymentArs != null ? String(s.minPaymentArs) : "");
-        setDueInput(s.dueDay != null ? String(s.dueDay) : "");
-        setNotesInput(s.notes ?? "");
-        setSaldoArsInput(
-          s.saldoDeudaArs != null ? String(s.saldoDeudaArs) : "",
-        );
-        setSaldoUsdInput(
-          s.saldoDeudaUsd != null ? String(s.saldoDeudaUsd) : "",
-        );
-      }
+      storeDeuda(data, setRes.ok, setData);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error de red");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [storeDeuda]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const ac = new AbortController();
+    Promise.all([
+      fetch("/api/stats/deuda", { credentials: "include", signal: ac.signal }),
+      fetch("/api/debt-settings", { credentials: "include", signal: ac.signal }),
+    ])
+      .then(async ([debtRes, setRes]) => {
+        const data = await debtRes.json();
+        if (!debtRes.ok) throw new Error(data.error || "Error");
+        const setData = await setRes.json();
+        return { data, settingsOk: setRes.ok, setData };
+      })
+      .then((payload) => {
+        if (ac.signal.aborted) return;
+        storeDeuda(payload.data, payload.settingsOk, payload.setData);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted || isAbortError(e)) return;
+        setError(e instanceof Error ? e.message : "Error de red");
+        setLoading(false);
+      });
+    return () => ac.abort();
+  }, [storeDeuda]);
 
   async function saveSettings(patch?: Partial<DebtSettings>) {
     setSavingSettings(true);

@@ -6,7 +6,7 @@
 const CACHE_NAME = "lc-share-target-v1";
 const SHARED_FILE_KEY = "shared-comprobante";
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 

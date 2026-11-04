@@ -51,7 +51,7 @@ ultimos("fixtures/bbva-card/ultimos-movimientos.xlsx", [
 }
 
 // ── BBVA "Movimientos del período" (xls, two cards) ─────────────────────────
-function period(path, sheetName, cardA, cardB, installA, installB) {
+function period(path, sheetName, cardA, cardB) {
   const aoa = [[], ["Movimientos del Período"], ["Nro. Tarjeta", "Fecha", "Establecimiento", "Cuota", "Importe en $ ", "Importe en U$S"]];
   const block = (rowsN, last4, specials) => {
     let total = 0;

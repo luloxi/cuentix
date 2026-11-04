@@ -7,8 +7,7 @@ import { TransactionsTable } from "@/components/transactions-table";
 import { SoonPage } from "@/components/soon-page";
 import { PageStack, SegmentedControl, Toast } from "@/components/ui";
 
-const TABS = ["lista", "resumen", "charts"] as const;
-type Tab = (typeof TABS)[number];
+type Tab = "lista" | "resumen" | "charts";
 
 function tabFromParam(raw: string | null): Tab {
   if (raw === "resumen" || raw === "charts" || raw === "lista") return raw;
@@ -18,15 +17,15 @@ function tabFromParam(raw: string | null): Tab {
 export function ConsumosWorkspace() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>(() =>
-    tabFromParam(searchParams.get("tab")),
-  );
+  const urlTab = tabFromParam(searchParams.get("tab"));
+  const [tab, setTab] = useState<Tab>(urlTab);
+  const [seenTab, setSeenTab] = useState(urlTab);
+  if (urlTab !== seenTab) {
+    setSeenTab(urlTab);
+    setTab(urlTab);
+  }
   const [tableKey, setTableKey] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
-
-  useEffect(() => {
-    setTab(tabFromParam(searchParams.get("tab")));
-  }, [searchParams]);
 
   useEffect(() => {
     function onCreated() {

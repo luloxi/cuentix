@@ -461,7 +461,7 @@ export async function PATCH(req: Request) {
       });
     }
 
-    let nextOwnership = body.ownership as "personal" | "shared" | undefined;
+    const nextOwnership = body.ownership as "personal" | "shared" | undefined;
     let nextPaidBy = body.paidByUserId as string | null | undefined;
     if (nextOwnership === "personal" && nextPaidBy == null) {
       nextPaidBy = sessionUser.id;
