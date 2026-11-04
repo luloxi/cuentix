@@ -1,11 +1,12 @@
-"""Favicon de pestaña de Cuentix (Ticket 2).
+"""Favicon de pestaña de Cuentix (Ticket 2), variante chica.
 
-Lee public/favicon-tab.v4.svg: recorte apretado, fondo transparente, el dibujo
-llena el viewBox. No lo regenera desde el ícono PWA (esa variante es más
-gruesa y ya viene cropeada).
+Lee public/favicon-tab.v5.svg: recorte apretado, fondo transparente, el dibujo
+llena el viewBox. Sin las dos líneas internas (se empastan a 16px) y con el
+tilde más grueso. No lo regenera desde el ícono PWA.
 
-Escribe public/icons/favicon-32.v4.png, public/icons/favicon.v4.ico (16/32/48,
-PNG embebido en RGBA para que Next lo acepte) y src/app/favicon.ico.
+Escribe public/icons/favicon-32.v5.png, public/icons/favicon.v5.ico (16/32/48,
+los tres tamaños salen del mismo svg, PNG embebido en RGBA para que Next lo
+acepte) y src/app/favicon.ico.
 
 No toca los íconos PWA ni apple-touch (scripts/make-cuentix-icons.mjs).
 Requiere cairosvg y Pillow.
@@ -18,7 +19,7 @@ import cairosvg
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-SUFFIX = "v4"
+SUFFIX = "v5"
 
 
 def render(svg: str, size: int) -> Image.Image:
@@ -100,4 +101,4 @@ for out in (
     )
     assert_ico_rgba_png(out)
 
-print("tab favicon written (favicon-32.v4.png, favicon.v4.ico, src/app/favicon.ico)")
+print("tab favicon written (favicon-32.v5.png, favicon.v5.ico, src/app/favicon.ico)")
