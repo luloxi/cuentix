@@ -14,20 +14,25 @@ import {
   stepToHref,
 } from "./swipe-path";
 
-describe("slim 5-item nav", () => {
-  it("is Inicio · Consumos · Cargas · Ingresos · Hogar", () => {
+describe("slim nav", () => {
+  it("is Inicio · Consumos · Ingresos · Hogar", () => {
     assert.deepEqual(
       NAV_LINKS.map((l) => l.label),
-      ["Inicio", "Consumos", "Cargas", "Ingresos", "Hogar"],
+      ["Inicio", "Consumos", "Ingresos", "Hogar"],
     );
     assert.deepEqual([...NAV_HREFS], [
       "/dashboard",
       "/consumos",
-      "/cargas",
       "/ingresos",
       "/compartido",
     ]);
-    assert.equal(NAV_LINKS.length, 5);
+    assert.equal(NAV_LINKS.length, 4);
+    assert.equal(
+      (NAV_LINKS as readonly { href: string; label: string }[]).some(
+        (l) => l.href === "/cargas" || l.label === "Cargas",
+      ),
+      false,
+    );
   });
 
   it("never puts Deuda in the bar, even if the flag is on", () => {
@@ -73,28 +78,20 @@ describe("DEUDA_ENABLED (no flag)", () => {
 });
 
 describe("home next action", () => {
-  it("points empty months at Cargas and the rest at Consumos", () => {
-    assert.deepEqual(homeNextAction(0), {
-      href: "/cargas",
-      label: "Cargá el resumen",
-    });
-    assert.deepEqual(homeNextAction(-1), {
-      href: "/cargas",
-      label: "Cargá el resumen",
-    });
-    assert.deepEqual(homeNextAction(1), {
-      href: "/consumos",
-      label: "Ver consumos",
-    });
-    assert.deepEqual(homeNextAction(12), {
-      href: "/consumos",
-      label: "Ver consumos",
-    });
+  it("stays on Consumos and never opens Cargas", () => {
+    for (const n of [0, -1, 1, 12]) {
+      assert.deepEqual(homeNextAction(n), {
+        href: "/consumos",
+        label: "Ver consumos",
+      });
+    }
   });
 
-  it("does not send the next action to Deuda", () => {
+  it("does not send the next action to Deuda or Cargas", () => {
     assert.notEqual(homeNextAction(0).href, "/deuda");
+    assert.notEqual(homeNextAction(0).href, "/cargas");
     assert.notEqual(homeNextAction(3).href, "/deuda");
+    assert.notEqual(homeNextAction(3).href, "/cargas");
   });
 });
 

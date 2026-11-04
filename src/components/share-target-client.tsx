@@ -293,10 +293,10 @@ export function ShareTargetClient() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => router.push("/cargas")}
-              className="lc-btn lc-btn-primary flex-1"
+              onClick={() => router.push("/")}
+              className="lc-btn lc-btn-primary min-h-10 flex-1 cursor-pointer"
             >
-              Ver cargas
+              Inicio
             </button>
             <button
               type="button"

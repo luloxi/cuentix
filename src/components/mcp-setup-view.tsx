@@ -508,14 +508,8 @@ headers = { Authorization = "Bearer ${snippetToken}" }`;
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
           <Link
-            href="/cargas"
-            className="lc-btn lc-btn-ghost !px-3 !py-2 text-sm"
-          >
-            Ir a Cargas
-          </Link>
-          <Link
             href="/compartido"
-            className="lc-btn lc-btn-ghost !px-3 !py-2 text-sm"
+            className="lc-btn lc-btn-ghost min-h-10 cursor-pointer !px-3 !py-2 text-sm"
           >
             Ir al hogar
           </Link>

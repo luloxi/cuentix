@@ -1,11 +1,10 @@
 /**
- * Canonical 5-item app nav. Deuda is never in the bar:
- * it is reached from Inicio and the swipe path.
+ * App nav. Cargas, Importar and Suscripción are not listed:
+ * those routes redirect to Inicio. Deuda stays off the bar.
  */
 export const NAV_LINKS = [
   { href: "/dashboard", label: "Inicio" },
   { href: "/consumos", label: "Consumos" },
-  { href: "/cargas", label: "Cargas" },
   { href: "/ingresos", label: "Ingresos" },
   { href: "/compartido", label: "Hogar" },
 ] as const;
@@ -20,13 +19,10 @@ export function navIncludesDeuda(
   return hrefs.some((h) => h === "/deuda" || h.startsWith("/deuda/"));
 }
 
-/** Home hero: one next action. Empty month → cargar; otherwise ver consumos. */
-export function homeNextAction(monthTxCount: number): {
-  href: "/cargas" | "/consumos";
+/** Home hero: read-only. Never an upload, billing, or add-expense link. */
+export function homeNextAction(_monthTxCount: number): {
+  href: "/consumos";
   label: string;
 } {
-  if (monthTxCount <= 0) {
-    return { href: "/cargas", label: "Cargá el resumen" };
-  }
   return { href: "/consumos", label: "Ver consumos" };
 }
