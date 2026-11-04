@@ -67,7 +67,7 @@ function openDb(): DatabaseSync {
   return db;
 }
 
-function wrap(db: DatabaseSync, log: Logged[]) {
+function wrap(db: DatabaseSync, log: Logged[], beforeWrite?: (sql: string) => void) {
   return {
     prepare(sql: string) {
       let params: unknown[] = [];
@@ -87,6 +87,7 @@ function wrap(db: DatabaseSync, log: Logged[]) {
           return (db.prepare(sql).get(...(params as never[])) as Record<string, unknown> | undefined) ?? null;
         },
         async run() {
+          beforeWrite?.(sql);
           log.push({ sql, params: [...params] });
           const info = db.prepare(sql).run(...(params as never[])) as { changes?: number };
           return { meta: { changes: Number(info.changes ?? 0) } };
@@ -113,9 +114,9 @@ function wrap(db: DatabaseSync, log: Logged[]) {
   };
 }
 
-function envFor(db: DatabaseSync, log: Logged[] = []): Env {
+function envFor(db: DatabaseSync, log: Logged[] = [], beforeWrite?: (sql: string) => void): Env {
   return {
-    DB: wrap(db, log) as unknown as Env["DB"],
+    DB: wrap(db, log, beforeWrite) as unknown as Env["DB"],
     RECEIPTS: { put: async () => null, get: async () => null },
     AI: { toMarkdown: async () => null },
     ASSETS: { fetch: async () => new Response(null, { status: 404 }) },
@@ -130,7 +131,7 @@ function insertTx(
     date?: string;
     householdId?: string;
     bank?: string;
-    categoryId?: string;
+    categoryId?: string | null;
     ownership?: string;
     paidBy?: string | null;
     isBusiness?: number;
@@ -152,7 +153,7 @@ function insertTx(
     row.description,
     row.amountArs === undefined ? "1500.50" : row.amountArs,
     row.amountUsd ?? null,
-    row.categoryId ?? "c-old",
+    row.categoryId === undefined ? "c-old" : row.categoryId,
     row.ownership ?? "shared",
     row.paidBy === undefined ? "u1" : row.paidBy,
     `fp-${row.id}`,
@@ -342,10 +343,9 @@ describe("fiwind reclassify", () => {
     assert.equal(body.key, "DIA");
     assert.deepEqual(body.variants, variants);
     assert.equal(body.capped, false);
-    const expected = ["cargo", "pago", "personal-other", "upper", "plain-dev", "retiro", "accent-cargo"].filter(
-      (id) => variants.includes(descriptionOf(db, id)),
-    ).length;
-    assert.equal(body.count, expected);
+    assert.equal(variants.includes(descriptionOf(db, "personal-other")), true);
+    assert.equal(variants.includes(descriptionOf(db, "pago")), true);
+    assert.equal(body.count, countExpected(db, variants));
     assert.ok(body.count >= 1);
     assert.equal(body.skippedBusiness, variants.includes("Pago a DIA") ? 1 : 0);
 
@@ -392,12 +392,21 @@ describe("fiwind reclassify", () => {
     assert.equal(appliedBody.updated, 1);
     assert.equal(appliedBody.similarUpdated, countExpected(db, variants));
     assert.equal(categoryOf(db, "target"), "c-h1");
+    assert.equal(variants.includes(descriptionOf(db, "personal-other")), true);
+    assert.equal(categoryOf(db, "personal-other"), "c-old");
+    assert.equal(variants.includes(descriptionOf(db, "pago")), true);
+    assert.equal(categoryOf(db, "pago"), "c-h1");
     for (const id of ["cargo", "pago", "personal-other", "upper", "plain-dev", "retiro", "accent-cargo", "diageo", "tienda", "bbva", "other-home", "biz"]) {
       const household = id === "other-home" ? "h2" : "h1";
       const bank = id === "bbva" ? "BBVA" : "Fiwind";
       const business = id === "biz";
+      const otherPersonal = id === "personal-other";
       const expected =
-        household === "h1" && bank === "Fiwind" && !business && variants.includes(descriptionOf(db, id))
+        household === "h1" &&
+        bank === "Fiwind" &&
+        !business &&
+        !otherPersonal &&
+        variants.includes(descriptionOf(db, id))
           ? "c-h1"
           : "c-old";
       assert.equal(categoryOf(db, id), expected, id);
@@ -438,6 +447,16 @@ describe("fiwind reclassify", () => {
       user,
     );
     assert.equal(fractional.status, 400);
+    const missing = await handleFiwindReclassify(
+      post({ id: "target", categoryId: "c-new", applyToSimilar: true }),
+      env,
+      user,
+    );
+    assert.equal(missing.status, 400);
+    const missingBody = (await missing.json()) as { error: string };
+    assert.match(missingBody.error, /expectedCount/);
+    assert.equal(categoryOf(db, "target"), "c-old");
+    assert.equal(categoryOf(db, "pago"), "c-old");
   });
 
   it("rejects an invalid category, a business row, and rows the user cannot see", async () => {
@@ -510,8 +529,181 @@ describe("fiwind reclassify", () => {
     assert.equal(Number(totals.neu), 501);
     assert.equal(Number(totals.old), 1);
     assert.equal(categoryOf(db, "cap-target"), "c-new");
+    const excluded = Array.from({ length: 501 }, (_, i) => `cap-${i}`).sort().at(-1);
+    assert.equal(categoryOf(db, excluded ?? ""), "c-old");
+    const kept = Array.from({ length: 501 }, (_, i) => `cap-${i}`).sort()[0];
+    assert.equal(categoryOf(db, kept ?? ""), "c-new");
     const still = db.prepare("SELECT COUNT(*) AS n FROM transactions").get() as { n: number };
     assert.equal(still.n, 502);
+  });
+
+  it("counts and updates another member's shared rows and the caller's personal rows", async () => {
+    const db = openDb();
+    seedWorld(db);
+    insertTx(db, {
+      id: "shared-other",
+      description: "Pago a DIA",
+      date: "2026-08-11",
+      ownership: "shared",
+      paidBy: "u2",
+    });
+    const env = envFor(db);
+    const variants = similarDescriptionVariants("Pago a Día");
+    assert.equal(variants.includes(descriptionOf(db, "shared-other")), true);
+    assert.equal(variants.includes(descriptionOf(db, "pago")), true);
+    assert.equal(variants.includes(descriptionOf(db, "personal-other")), true);
+    const preview = await handleFiwindReclassify(request("/api/fiwind/similar?id=target"), env, user);
+    assert.equal(preview.status, 200);
+    const previewBody = (await preview.json()) as { count: number };
+    assert.equal(previewBody.count, countExpected(db, variants) + 1);
+
+    const applied = await handleFiwindReclassify(
+      post({
+        id: "target",
+        categoryId: "c-new",
+        applyToSimilar: true,
+        expectedCount: previewBody.count,
+      }),
+      env,
+      user,
+    );
+    assert.equal(applied.status, 200);
+    const appliedBody = (await applied.json()) as { similarUpdated: number };
+    assert.equal(appliedBody.similarUpdated, previewBody.count);
+    assert.equal(categoryOf(db, "shared-other"), "c-new");
+    assert.equal(categoryOf(db, "pago"), "c-new");
+    assert.equal(categoryOf(db, "personal-other"), "c-old");
+  });
+
+  it("counts and updates only shared rows in a shared-only household", async () => {
+    const db = openDb();
+    insertTx(db, {
+      id: "casa-target",
+      description: "Pago a DIA",
+      householdId: "h2",
+      ownership: "shared",
+      paidBy: "u1",
+    });
+    insertTx(db, {
+      id: "casa-shared",
+      description: "Pago a DIA",
+      householdId: "h2",
+      ownership: "shared",
+      paidBy: "u2",
+    });
+    insertTx(db, {
+      id: "casa-own",
+      description: "Pago a DIA",
+      householdId: "h2",
+      ownership: "personal",
+      paidBy: "u1",
+    });
+    insertTx(db, {
+      id: "casa-theirs",
+      description: "Pago a DIA",
+      householdId: "h2",
+      ownership: "personal",
+      paidBy: "u2",
+    });
+    const env = envFor(db);
+    const preview = await handleFiwindReclassify(
+      request("/api/fiwind/similar?id=casa-target", "lc_household=h2"),
+      env,
+      user,
+    );
+    assert.equal(preview.status, 200);
+    const previewBody = (await preview.json()) as { count: number };
+    assert.equal(previewBody.count, 1);
+    const applied = await handleFiwindReclassify(
+      post(
+        { id: "casa-target", categoryId: "c-new", applyToSimilar: true, expectedCount: 1 },
+        "lc_household=h2",
+      ),
+      env,
+      user,
+    );
+    assert.equal(applied.status, 200);
+    const appliedBody = (await applied.json()) as { updated: number; similarUpdated: number };
+    assert.equal(appliedBody.updated, 1);
+    assert.equal(appliedBody.similarUpdated, 1);
+    assert.equal(categoryOf(db, "casa-target"), "c-new");
+    assert.equal(categoryOf(db, "casa-shared"), "c-new");
+    assert.equal(categoryOf(db, "casa-own"), "c-old");
+    assert.equal(categoryOf(db, "casa-theirs"), "c-old");
+  });
+
+  it("skips rows already in the target category and still counts null categories", async () => {
+    const db = openDb();
+    insertTx(db, { id: "target", description: "Pago a DIA" });
+    insertTx(db, { id: "already", description: "Pago a DIA", categoryId: "c-new" });
+    insertTx(db, { id: "empty", description: "Pago a DIA", categoryId: null });
+    insertTx(db, { id: "other", description: "Pago a DIA" });
+    const env = envFor(db);
+    const open = await handleFiwindReclassify(request("/api/fiwind/similar?id=target"), env, user);
+    const openBody = (await open.json()) as { count: number };
+    assert.equal(open.status, 200);
+    assert.equal(openBody.count, 3);
+    const filtered = await handleFiwindReclassify(
+      request("/api/fiwind/similar?id=target&categoryId=c-new"),
+      env,
+      user,
+    );
+    const filteredBody = (await filtered.json()) as { count: number };
+    assert.equal(filtered.status, 200);
+    assert.equal(filteredBody.count, 2);
+
+    const missing = await handleFiwindReclassify(
+      post({ id: "target", categoryId: "c-new", applyToSimilar: true }),
+      env,
+      user,
+    );
+    assert.equal(missing.status, 400);
+    assert.equal(categoryOf(db, "empty"), null);
+    assert.equal(categoryOf(db, "other"), "c-old");
+
+    const stale = await handleFiwindReclassify(
+      post({ id: "target", categoryId: "c-new", applyToSimilar: true, expectedCount: openBody.count }),
+      env,
+      user,
+    );
+    assert.equal(stale.status, 409);
+    const staleBody = (await stale.json()) as { count: number };
+    assert.equal(staleBody.count, 2);
+    assert.equal(categoryOf(db, "target"), "c-old");
+    assert.equal(categoryOf(db, "already"), "c-new");
+
+    const applied = await handleFiwindReclassify(
+      post({ id: "target", categoryId: "c-new", applyToSimilar: true, expectedCount: 2 }),
+      env,
+      user,
+    );
+    assert.equal(applied.status, 200);
+    const appliedBody = (await applied.json()) as { similarUpdated: number };
+    assert.equal(appliedBody.similarUpdated, 2);
+    assert.equal(categoryOf(db, "already"), "c-new");
+    assert.equal(categoryOf(db, "empty"), "c-new");
+    assert.equal(categoryOf(db, "other"), "c-new");
+    assert.equal(categoryOf(db, "target"), "c-new");
+  });
+
+  it("does not update the selected movement when it is business at write time", async () => {
+    const db = openDb();
+    seedWorld(db);
+    const env = envFor(db, [], (sql) => {
+      if (sql.includes("SET category_id")) {
+        db.prepare("UPDATE transactions SET is_business = 1 WHERE id = 'target'").run();
+      }
+    });
+    const res = await handleFiwindReclassify(post({ id: "target", categoryId: "c-new" }), env, user);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { updated: number; similarUpdated: number };
+    assert.equal(body.updated, 0);
+    assert.equal(body.similarUpdated, 0);
+    assert.equal(categoryOf(db, "target"), "c-old");
+    const flag = db.prepare("SELECT is_business AS business FROM transactions WHERE id = 'target'").get() as {
+      business: number;
+    };
+    assert.equal(Number(flag.business), 1);
   });
 
   it("rejects anonymous calls and serves the route for a session", async () => {
@@ -547,6 +739,10 @@ describe("fiwind reclassify query budget", () => {
     assert.doesNotMatch(source, /\bLIKE\b/i);
     assert.doesNotMatch(source, /\bGLOB\b/i);
     assert.doesNotMatch(source, /\b(upper|lower)\s*\(/i);
+    assert.doesNotMatch(source, /category_id\s*(!=|<>)/);
+    assert.match(source, /ownership = 'shared' OR paid_by_user_id = \?/);
+    assert.match(source, /category_id IS NOT \?/);
+    assert.equal((source.match(/ORDER BY date DESC, id\n/g) ?? []).length, 2);
     const statements = sqlTemplates(source);
     assert.ok(statements.length >= 6, `found ${statements.length}`);
     for (const sql of statements) {
@@ -558,6 +754,70 @@ describe("fiwind reclassify query budget", () => {
       assert.ok(/\bLIMIT\b/.test(sql) || primaryKey, sql);
       assert.equal(sql.includes("'Fiwind'"), true, sql);
     }
+    const bulk = statements.find((sql) => /UPDATE/i.test(sql) && /LIMIT \$\{SIMILAR_CAP\}/.test(sql));
+    assert.ok(bulk);
+    assert.equal((bulk.match(/household_id\s*=\s*\?/g) ?? []).length, 1);
+    assert.match(bulk, /INDEXED BY tx_household_desc_idx/);
+    assert.match(bulk, /is_business = 0/);
+    assert.match(bulk, /category_id IS NOT \?/);
+    assert.match(bulk, /ORDER BY date DESC, id/);
+    assert.doesNotMatch(bulk, /LIMIT \$\{SIMILAR_CAP\}\s*\)\s*AND household_id/);
+    const targetUpdate = statements.find((sql) => /UPDATE/i.test(sql) && /\bid\s*=\s*\?/.test(sql));
+    assert.ok(targetUpdate);
+    assert.match(targetUpdate, /is_business = 0/);
+  });
+
+  it("plans similar reads and the bulk update on tx_household_desc_idx", async () => {
+    const db = openDb();
+    seedWorld(db);
+    const log: Logged[] = [];
+    const env = envFor(db, log);
+    const variants = similarDescriptionVariants("Pago a Día");
+    const preview = await handleFiwindReclassify(
+      request("/api/fiwind/similar?id=target&categoryId=c-new"),
+      env,
+      user,
+    );
+    assert.equal(preview.status, 200);
+    const applied = await handleFiwindReclassify(
+      post({
+        id: "target",
+        categoryId: "c-new",
+        applyToSimilar: true,
+        expectedCount: countExpected(db, variants),
+      }),
+      env,
+      user,
+    );
+    assert.equal(applied.status, 200);
+    const casa = await handleFiwindReclassify(
+      request("/api/fiwind/similar?id=h2-shared", "lc_household=h2"),
+      env,
+      user,
+    );
+    assert.equal(casa.status, 200);
+    assertPlans(db, log);
+    const probes = log.filter((entry) => /description_normalized\s+IN\s*\(/i.test(entry.sql));
+    const personal = probes.filter((entry) => householdOf(entry) === "h1");
+    const shared = probes.filter((entry) => householdOf(entry) === "h2");
+    assert.ok(personal.length >= 1);
+    assert.ok(shared.length >= 1);
+    for (const entry of personal) {
+      assert.match(entry.sql, /ownership = 'shared' OR paid_by_user_id = \?/);
+      assert.match(entry.sql, /ORDER BY date DESC, id/);
+    }
+    for (const entry of shared) {
+      assert.match(entry.sql, /AND ownership = 'shared'/);
+      assert.doesNotMatch(entry.sql, /paid_by_user_id/);
+    }
+    const updates = probes.filter((entry) => /^\s*UPDATE/i.test(entry.sql));
+    assert.equal(updates.length, 1);
+    assert.match(updates[0]?.sql ?? "", /category_id IS NOT \?/);
+    assert.match(updates[0]?.sql ?? "", /is_business = 0/);
+    assert.doesNotMatch(updates[0]?.sql ?? "", /LIMIT \d+\s*\)\s*AND household_id/i);
+    const targetWrites = log.filter((entry) => /^\s*UPDATE/i.test(entry.sql) && /\bid\s*=\s*\?/.test(entry.sql));
+    assert.equal(targetWrites.length, 1);
+    assert.match(targetWrites[0]?.sql ?? "", /is_business = 0/);
   });
 });
 
@@ -578,9 +838,14 @@ function descriptionOf(db: DatabaseSync, id: string): string {
 }
 
 function countExpected(db: DatabaseSync, variants: string[]): number {
-  return ["cargo", "pago", "personal-other", "upper", "plain-dev", "retiro", "accent-cargo"].filter((id) =>
+  return ["cargo", "pago", "upper", "plain-dev", "retiro", "accent-cargo"].filter((id) =>
     variants.includes(descriptionOf(db, id)),
   ).length;
+}
+
+function householdOf(entry: Logged): unknown {
+  if (/^\s*UPDATE/i.test(entry.sql)) return entry.params[2];
+  return entry.params[0];
 }
 
 function assertPlans(db: DatabaseSync, log: Logged[]) {
@@ -597,5 +862,9 @@ function assertPlans(db: DatabaseSync, log: Logged[]) {
       /tx_household_date_idx|tx_household_desc_idx|sqlite_autoindex_transactions_1/,
       `${detail}\n${entry.sql}`,
     );
+    if (/description_normalized\s+IN\s*\(/i.test(entry.sql)) {
+      assert.match(detail, /tx_household_desc_idx/, `${detail}\n${entry.sql}`);
+      assert.doesNotMatch(detail, /tx_household_date_idx/, `${detail}\n${entry.sql}`);
+    }
   }
 }

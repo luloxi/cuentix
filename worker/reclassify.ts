@@ -2,6 +2,7 @@
  * Reclasificar Fiwind. Reads of the transactions table stay on one household,
  * use tx_household_date_idx, tx_household_desc_idx, or the primary key,
  * and stop at a LIMIT. description_normalized is matched by equality.
+ * Similar counts and updates use the list visibility predicate.
  */
 import {
   counterpartyKey,
@@ -72,7 +73,7 @@ const TARGET_SQL = `SELECT t.id, t.description_normalized, t.ownership, t.paid_b
 
 const TARGET_UPDATE_SQL = `UPDATE transactions
      SET category_id = ?, updated_at = ?
-     WHERE id = ? AND household_id = ? AND bank = 'Fiwind'`;
+     WHERE id = ? AND household_id = ? AND bank = 'Fiwind' AND is_business = 0`;
 
 export async function handleFiwindReclassify(
   req: Request,
@@ -124,14 +125,17 @@ async function listMovements(req: Request, env: Env, user: SessionUser): Promise
 async function similarOf(req: Request, env: Env, user: SessionUser): Promise<Response> {
   const { active } = await activeHousehold(req, env, user.id);
   if (!active) return json({ error: "NO_HOUSEHOLD" }, 400);
-  const id = (new URL(req.url).searchParams.get("id") ?? "").trim();
+  const url = new URL(req.url);
+  const id = (url.searchParams.get("id") ?? "").trim();
   if (!id) return json({ error: "Falta id" }, 400);
   const loaded = await loadTarget(env, id, active.id);
   if (loaded instanceof Response) return loaded;
-  if (!canSee(loaded, user.id, forceSharedOnly(active.name))) {
+  const sharedOnly = forceSharedOnly(active.name);
+  if (!canSee(loaded, user.id, sharedOnly)) {
     return json({ error: "Sin permiso" }, 403);
   }
-  return json(await describeSimilar(env, active.id, loaded));
+  const categoryId = (url.searchParams.get("categoryId") ?? "").trim() || null;
+  return json(await describeSimilar(env, active.id, loaded, user.id, sharedOnly, categoryId));
 }
 
 async function reclassify(req: Request, env: Env, user: SessionUser): Promise<Response> {
@@ -153,11 +157,14 @@ async function reclassify(req: Request, env: Env, user: SessionUser): Promise<Re
   const categoryId = body.categoryId.trim();
   const applyToSimilar = body.applyToSimilar === true;
   const expected = readExpectedCount(body.expectedCount);
-  if (expected === "bad") return json({ error: "expectedCount inválido" }, 400);
+  if (expected === "bad" || (applyToSimilar && expected == null)) {
+    return json({ error: "expectedCount inválido" }, 400);
+  }
 
   const loaded = await loadTarget(env, id, active.id);
   if (loaded instanceof Response) return loaded;
-  if (!canSee(loaded, user.id, forceSharedOnly(active.name))) {
+  const sharedOnly = forceSharedOnly(active.name);
+  if (!canSee(loaded, user.id, sharedOnly)) {
     return json({ error: "Sin permiso" }, 403);
   }
   if (loaded.is_business === 1) {
@@ -174,8 +181,8 @@ async function reclassify(req: Request, env: Env, user: SessionUser): Promise<Re
 
   const variants = variantsFor(loaded.description_normalized);
   let similarUpdated = 0;
-  if (applyToSimilar && expected != null) {
-    const stats = await describeSimilar(env, active.id, loaded);
+  if (applyToSimilar) {
+    const stats = await describeSimilar(env, active.id, loaded, user.id, sharedOnly, categoryId);
     if (expected !== stats.count) {
       return json(
         {
@@ -203,17 +210,15 @@ async function reclassify(req: Request, env: Env, user: SessionUser): Promise<Re
            AND description_normalized IN (${slots})
            AND id != ?
            AND is_business = 0
+           AND ${visibilitySql(sharedOnly)}
+           AND category_id IS NOT ?
+         ORDER BY date DESC, id
          LIMIT ${SIMILAR_CAP}
-       )
-       AND household_id = ?`;
-    const similarStmt = env.DB.prepare(similarSql).bind(
-      categoryId,
-      now,
-      active.id,
-      ...variants,
-      loaded.id,
-      active.id,
-    );
+       )`;
+    const similarBinds: unknown[] = [categoryId, now, active.id, ...variants, loaded.id];
+    if (!sharedOnly) similarBinds.push(user.id);
+    similarBinds.push(categoryId);
+    const similarStmt = env.DB.prepare(similarSql).bind(...similarBinds);
     const results = await env.DB.batch([targetStmt, similarStmt]);
     updated = changesOf(results[0]);
     similarUpdated = changesOf(results[1]);
@@ -229,15 +234,22 @@ async function loadTarget(env: Env, id: string, householdId: string): Promise<Ta
   return row;
 }
 
-async function describeSimilar(env: Env, householdId: string, row: TargetRow) {
+async function describeSimilar(
+  env: Env,
+  householdId: string,
+  row: TargetRow,
+  userId: string,
+  sharedOnly: boolean,
+  categoryId: string | null,
+) {
   const variants = variantsFor(row.description_normalized);
   const key = counterpartyKey(row.description_normalized);
   if (variants.length === 0) {
     return { key, variants, count: 0, capped: false, skippedBusiness: 0 };
   }
   const [raw, skippedRaw] = await Promise.all([
-    countProbe(env, householdId, variants, row.id, 0),
-    countProbe(env, householdId, variants, row.id, 1),
+    countProbe(env, householdId, variants, row.id, 0, userId, sharedOnly, categoryId),
+    countProbe(env, householdId, variants, row.id, 1, userId, sharedOnly, categoryId),
   ]);
   const capped = raw > SIMILAR_CAP;
   return {
@@ -255,21 +267,32 @@ async function countProbe(
   variants: string[],
   excludeId: string,
   business: 0 | 1,
+  userId: string,
+  sharedOnly: boolean,
+  categoryId: string | null,
 ): Promise<number> {
   const slots = variants.map(() => "?").join(", ");
   const sql = `SELECT COUNT(*) AS n FROM (
-       SELECT 1 FROM transactions INDEXED BY tx_household_desc_idx
+       SELECT id FROM transactions INDEXED BY tx_household_desc_idx
        WHERE household_id = ?
          AND bank = 'Fiwind'
          AND description_normalized IN (${slots})
          AND id != ?
          AND is_business = ?
+         AND ${visibilitySql(sharedOnly)}
+         ${categoryId != null ? "AND category_id IS NOT ?" : ""}
+       ORDER BY date DESC, id
        LIMIT ${COUNT_PROBE}
      )`;
-  const row = await env.DB.prepare(sql)
-    .bind(householdId, ...variants, excludeId, business)
-    .first<{ n: number }>();
+  const binds: unknown[] = [householdId, ...variants, excludeId, business];
+  if (!sharedOnly) binds.push(userId);
+  if (categoryId != null) binds.push(categoryId);
+  const row = await env.DB.prepare(sql).bind(...binds).first<{ n: number }>();
   return num(row?.n);
+}
+
+function visibilitySql(sharedOnly: boolean): string {
+  return sharedOnly ? "ownership = 'shared'" : "(ownership = 'shared' OR paid_by_user_id = ?)";
 }
 
 function variantsFor(description: string): string[] {
