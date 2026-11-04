@@ -1,6 +1,6 @@
 {
-  "name": "Cuentix",
-  "short_name": "Cuentix",
+  "name": "Tarask",
+  "short_name": "Tarask",
   "description": "Importá gastos de tarjeta, tickets y balance compartido",
   "start_url": "/dashboard",
   "display": "standalone",

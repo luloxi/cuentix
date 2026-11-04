@@ -100,7 +100,7 @@ export function AppNav() {
                 size={32}
                 className="transition-transform duration-200 group-hover:scale-[1.03]"
               />
-              <span className="text-[15px] tracking-tight">Cuentix</span>
+              <span className="text-[15px] tracking-tight">Tarask</span>
             </Link>
             <div className="flex items-center gap-1">
               <HouseholdSwitcher variant="header" />

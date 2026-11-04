@@ -27,7 +27,7 @@ describe("mcp helpers", () => {
   });
 
   it("exposes the public MCP catalogue", () => {
-    assert.equal(MCP_PUBLIC_URL, "https://cuentix.lulox.com.ar/api/mcp");
+    assert.equal(MCP_PUBLIC_URL, "https://tarask.lulox.com.ar/api/mcp");
     const names = MCP_TOOLS.map((t) => t.name);
     assert.deepEqual(names, [
       "gastos_del_mes",

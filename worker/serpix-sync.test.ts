@@ -758,7 +758,9 @@ describe("worker cron", () => {
   });
 
   it("prod cron is every 10 minutes and the secret stays out of config", () => {
-    const prod = JSON.parse(readFileSync(join(root, "wrangler.jsonc"), "utf8")) as {
+    const prod = JSON.parse(
+      readFileSync(join(root, "wrangler.jsonc"), "utf8").replace(/^\s*\/\/.*$/gm, ""),
+    ) as {
       triggers?: { crons?: string[] };
       vars?: Record<string, string>;
     };

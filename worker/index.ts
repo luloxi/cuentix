@@ -31,9 +31,12 @@ import { flushOutbox } from "./serpix-sync";
 import { handleSvc } from "./svc";
 import { handleTransactions } from "./transactions";
 import { handleFiwindReclassify } from "./reclassify";
+import { redirectLegacyHost } from "./legacy-host";
 
 const worker = {
   async fetch(req: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
+    const legacy = redirectLegacyHost(req);
+    if (legacy) return legacy;
     const url = new URL(req.url);
     const path = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
     try {

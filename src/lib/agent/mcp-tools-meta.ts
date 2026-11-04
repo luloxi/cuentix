@@ -26,6 +26,6 @@ export const MCP_PUBLIC_PATH = "/api/mcp";
 /** Live app origin. Override with NEXT_PUBLIC_APP_URL at build time. */
 const APP_ORIGIN =
   process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "") ||
-  "https://cuentix.lulox.com.ar";
+  "https://tarask.lulox.com.ar";
 
 export const MCP_PUBLIC_URL = `${APP_ORIGIN}/api/mcp`;

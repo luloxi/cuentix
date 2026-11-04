@@ -229,17 +229,17 @@ headers = { Authorization = "Bearer ${snippetToken}" }`;
       <PageHeader
         eyebrow="Agentes"
         title="MCP remoto"
-        description="Conectá Cuentix a grok.com u otra IA con un token de este hogar. Ese token no ve los datos de otro hogar."
+        description="Conectá Tarask a grok.com u otra IA con un token de este hogar. Ese token no ve los datos de otro hogar."
       />
 
       <Surface className="space-y-2 border border-amber-500/40 bg-amber-50/80 dark:bg-amber-950/30">
         <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-          Importante: tus datos salen de Cuentix
+          Importante: tus datos salen de Tarask
         </p>
         <p className="text-sm leading-relaxed text-amber-900/90 dark:text-amber-100/90">
           Cuando conectás una IA (grok.com, Cursor u otra) por MCP, los
           movimientos y resúmenes que consultás o importás{" "}
-          <strong>salen de Cuentix hacia esa IA</strong>. Es el punto: el
+          <strong>salen de Tarask hacia esa IA</strong>. Es el punto: el
           agente los lee para ayudarte. Si no querés eso, no conectes MCP.
         </p>
         <p className="text-sm leading-relaxed text-amber-900/90 dark:text-amber-100/90">
@@ -513,7 +513,7 @@ headers = { Authorization = "Bearer ${snippetToken}" }`;
             Ir al hogar
           </Link>
           <a
-            href="https://github.com/luloxi/cuentix/blob/main/docs/agent-api.md"
+            href="https://github.com/luloxi/tarask/blob/main/docs/agent-api.md"
             target="_blank"
             rel="noreferrer"
             className="lc-btn lc-btn-ghost !px-3 !py-2 text-sm"

@@ -1,11 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  // Worker, D1 and R2 bucket keep the old internal names on purpose.
   "name": "cuentix",
   "account_id": "124b4210ff80c15610ed109083a5cf95",
   "main": "worker/entry.ts",
   "compatibility_date": "2026-10-30",
   "workers_dev": true,
-  "routes": [{ "pattern": "cuentix.lulox.com.ar", "custom_domain": true }],
+  "routes": [{ "pattern": "tarask.lulox.com.ar", "custom_domain": true }, { "pattern": "cuentix.lulox.com.ar", "custom_domain": true }],
   "assets": {
     "directory": "./out",
     "binding": "ASSETS",
@@ -32,8 +33,8 @@
     "crons": ["*/10 * * * *"]
   },
   "vars": {
-    "NEXT_PUBLIC_APP_URL": "https://cuentix.lulox.com.ar",
-    "AUTH_URL": "https://cuentix.lulox.com.ar",
+    "NEXT_PUBLIC_APP_URL": "https://tarask.lulox.com.ar",
+    "AUTH_URL": "https://tarask.lulox.com.ar",
     "SERPIX_SYNC_URL": "https://erp.lulox.com.ar/api/integrations/cuentix/events"
   },
   "observability": { "enabled": true }

@@ -33,7 +33,7 @@ export function BrandWordmark({ className }: { className?: string }) {
       )}
     >
       <BrandLogo size={32} />
-      <span>Cuentix</span>
+      <span>Tarask</span>
     </span>
   );
 }

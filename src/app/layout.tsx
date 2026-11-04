@@ -14,16 +14,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Cuentix",
-  applicationName: "Cuentix",
+  title: "Tarask",
+  applicationName: "Tarask",
   description:
     "Importá gastos de tarjeta, fotografiá tickets y compartí el balance con tu grupo.",
   manifest: "/manifest.v3.webmanifest",
   openGraph: {
-    title: "Cuentix",
+    title: "Tarask",
     description:
       "Importá gastos de tarjeta, fotografiá tickets y compartí el balance con tu grupo.",
-    siteName: "Cuentix",
+    siteName: "Tarask",
     type: "website",
   },
   icons: {
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    title: "Cuentix",
+    title: "Tarask",
     statusBarStyle: "black-translucent",
   },
 };

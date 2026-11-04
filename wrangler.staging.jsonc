@@ -28,8 +28,8 @@
   ],
   "ai": { "binding": "AI" },
   "vars": {
-    "NEXT_PUBLIC_APP_URL": "https://cuentix.lulox.com.ar",
-    "AUTH_URL": "https://cuentix.lulox.com.ar",
+    "NEXT_PUBLIC_APP_URL": "https://tarask.lulox.com.ar",
+    "AUTH_URL": "https://tarask.lulox.com.ar",
     "SERPIX_SYNC_URL": "https://erp.lulox.com.ar/api/integrations/cuentix/events"
   },
   "observability": { "enabled": true }

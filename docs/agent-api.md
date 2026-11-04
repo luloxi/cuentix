@@ -1,13 +1,13 @@
 # Agent API + MCP remoto (token por hogar)
 
-Cuentix expone los mismos datos del hogar por:
+Tarask expone los mismos datos del hogar por:
 
 1. **HTTP Agent API** (`/api/agent/*`) — ideal para `curl` / scripts.
 2. **MCP remoto** (`/api/mcp`) — Streamable HTTP para grok.com, Cursor u otros clientes MCP.
 
 Ambos usan el **token del hogar** (Bearer) y la misma lógica (no inventan números). La PWA sigue con cookie de sesión; esto es para máquinas / IAs.
 
-UI de setup (español): **`/mcp`** en la PWA (`https://cuentix.lulox.com.ar/mcp`).
+UI de setup (español): **`/mcp`** en la PWA (`https://tarask.lulox.com.ar/mcp`).
 
 Polar (suscripción por hogar) y monotributo **no** se implementan acá: primero token por hogar, después Polar, después monotributo.
 
@@ -24,7 +24,7 @@ Cookie login sigue para la PWA. Bearer es para agentes / MCP.
 ### Cómo mintar un token del hogar
 
 1. Entrá a la PWA con tu usuario (sesión).
-2. Andá a **https://cuentix.lulox.com.ar/mcp** (también hay un atajo “Token MCP” en Hogar).
+2. Andá a **https://tarask.lulox.com.ar/mcp** (también hay un atajo “Token MCP” en Hogar).
 3. Tocá **Generar token del hogar**. Copiá el valor ahora: no se vuelve a mostrar.
 4. Pegalo en grok.com / Grok CLI / Cursor como `Authorization: Bearer …` (en la config del MCP, **no** en el chat).
 5. Si se filtró o lo perdiste: **Rotar** (invalida el anterior) o **Revocar**.
@@ -48,7 +48,7 @@ If tools return `code: "no_household"`, mint from `/mcp` while logged into that 
 
 ## MCP remoto
 
-- **URL:** `https://cuentix.lulox.com.ar/api/mcp`
+- **URL:** `https://tarask.lulox.com.ar/api/mcp`
 - **Transport:** Streamable HTTP (MCP 2025/2026). Stateless on Cloudflare Workers (OpenNext). El host anterior `https://llevacuentas.vercel.app` queda solo como legado.
 - **Auth:** header `Authorization: Bearer <token del hogar>` (no OAuth browser flow).
 
@@ -69,7 +69,7 @@ Todas las tools filtran por el `household_id` del token.
 export LLEVACUENTAS_TOKEN="…"   # token del hogar, copiado una vez desde /mcp
 
 grok mcp add --transport http llevacuentas \
-  https://cuentix.lulox.com.ar/api/mcp \
+  https://tarask.lulox.com.ar/api/mcp \
   --header "Authorization: Bearer ${LLEVACUENTAS_TOKEN}"
 ```
 
@@ -77,7 +77,7 @@ O en `~/.grok/config.toml`:
 
 ```toml
 [mcp_servers.llevacuentas]
-url = "https://cuentix.lulox.com.ar/api/mcp"
+url = "https://tarask.lulox.com.ar/api/mcp"
 headers = { Authorization = "Bearer ${LLEVACUENTAS_TOKEN}" }
 ```
 
@@ -89,7 +89,7 @@ En grok.com: MCP remoto Streamable HTTP, misma URL, header `Authorization: Beare
 {
   "mcpServers": {
     "llevacuentas": {
-      "url": "https://cuentix.lulox.com.ar/api/mcp",
+      "url": "https://tarask.lulox.com.ar/api/mcp",
       "headers": {
         "Authorization": "Bearer ${LLEVACUENTAS_TOKEN}"
       }
@@ -171,7 +171,7 @@ Si el PDF no matchea el parser BBVA y está `OPENAI_API_KEY`, el import usa IA (
 
 ## Privacidad
 
-Cuando conectás una IA por MCP, los movimientos salen de Cuentix hacia esa IA. No pegues el token del hogar en chats ni en el repo. Polar/suscripción no se toca con este cambio.
+Cuando conectás una IA por MCP, los movimientos salen de Tarask hacia esa IA. No pegues el token del hogar en chats ni en el repo. Polar/suscripción no se toca con este cambio.
 
 ## API de servicio (solo lectura)
 
@@ -215,7 +215,7 @@ curl -sS -H "Authorization: Bearer $MCP_SERVICE_TOKEN" \
 
 ## McpRpc (solo service binding)
 
-`lulox-mcp` llama a Cuentix por un service binding de Cloudflare al entrypoint `McpRpc` (`worker/entry.ts`, clase que extiende `WorkerEntrypoint`). No es una ruta HTTP y no lee `Authorization`. El binding es el límite de confianza: no hace falta `MCP_SERVICE_TOKEN` y no hay secretos nuevos. El usuario es el de la API de servicio (`MCP_SERVICE_USER_EMAIL`, o el email admin si falta).
+`lulox-mcp` llama a Tarask por un service binding de Cloudflare al entrypoint `McpRpc` (`worker/entry.ts`, clase que extiende `WorkerEntrypoint`). No es una ruta HTTP y no lee `Authorization`. El binding es el límite de confianza: no hace falta `MCP_SERVICE_TOKEN` y no hay secretos nuevos. El usuario es el de la API de servicio (`MCP_SERVICE_USER_EMAIL`, o el email admin si falta).
 
 Cada método recibe un solo objeto y devuelve `{ ok: true, data }` o `{ ok: false, error: { code, message } }`. `code` es `no_owner`, `invalid`, `not_found`, `not_enabled` o `internal`. Un `internal` no incluye stack ni SQL. `data` es el mismo JSON que el GET de la tabla de arriba.
 

@@ -10,7 +10,7 @@ import {
   authVerification,
 } from "@/lib/db/schema";
 
-const APP_ORIGIN = "https://cuentix.lulox.com.ar";
+const APP_ORIGIN = "https://tarask.lulox.com.ar";
 
 async function readEnv(name: string): Promise<string | undefined> {
   const fromProcess = process.env[name]?.trim();
@@ -59,7 +59,7 @@ export async function getAuth() {
   const googleSecret = await readEnv("GOOGLE_CLIENT_SECRET");
 
   return betterAuth({
-    appName: "Cuentix",
+    appName: "Tarask",
     baseURL,
     secret,
     trustedOrigins: (request) => {

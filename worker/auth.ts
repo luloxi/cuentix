@@ -14,6 +14,7 @@ import {
 } from "./http";
 
 export const ADMIN_EMAIL = "lucianoolivabianco@gmail.com";
+// Google returns to the old host, which 301s to tarask with the same path+query, so the state cookie set on tarask is read there.
 const REDIRECT_URI = "https://cuentix.lulox.com.ar/api/auth/callback/google";
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const OAUTH_TTL_MS = 10 * 60 * 1000;

@@ -77,7 +77,7 @@ export function LoginClient() {
           <div className="mb-5 flex items-center gap-3 sm:mb-7">
             <BrandLogo size={44} />
             <span className="text-lg font-semibold tracking-tight sm:text-xl">
-              Cuentix
+              Tarask
             </span>
           </div>
 
