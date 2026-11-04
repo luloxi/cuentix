@@ -19,7 +19,7 @@ import { formatPesos, formatUsd, cn } from "@/lib/utils";
 import { PatrimonioGlance } from "@/components/patrimonio-view";
 import { formatPeriodTitle, isCurrentCalendarMonth } from "@/lib/period-label";
 import { CategoryIcon } from "@/lib/category-icons";
-import { colorForCategory } from "@/lib/category-colors";
+import { colorForCategory, tint } from "@/lib/category-colors";
 import { DEUDA_ENABLED } from "@/lib/features";
 import {
   getHomeHiddenSnapshot,
@@ -541,7 +541,7 @@ export function DashboardHome({
                     <div className="flex items-center gap-2.5">
                       <span
                         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
-                        style={{ backgroundColor: `${color}22`, color }}
+                        style={{ backgroundColor: tint(color, 15), color }}
                       >
                         <CategoryIcon slug={c.slug} size={15} />
                       </span>

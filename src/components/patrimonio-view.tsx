@@ -361,10 +361,10 @@ function PatrimonioChart({ points, showParts }: { points: PatrimonioPoint[]; sho
           className="lc-spark-line"
         />
         <circle cx={x(last)} cy={y(points[last]!.netWorthArs)} r="4.5" fill="var(--chart-1)" className="lc-spark-dot" />
-        <text x={pad.left} y={height - 6} className="fill-[var(--muted-fg)] text-[11px]">
+        <text x={pad.left} y={height - 6} fill="var(--chart-axis)" fontSize={11}>
           {formatDateAr(points[0]!.date)}
         </text>
-        <text x={width - pad.right} y={height - 6} textAnchor="end" className="fill-[var(--muted-fg)] text-[11px]">
+        <text x={width - pad.right} y={height - 6} textAnchor="end" fill="var(--chart-axis)" fontSize={11}>
           {formatDateAr(points[last]!.date)}
         </text>
       </svg>
@@ -458,10 +458,10 @@ function FlowChart({ points }: { points: FlowPoint[] }) {
             </rect>
           );
         })}
-        <text x={pad.left} y={height - 6} className="fill-[var(--muted-fg)] text-[11px]">
+        <text x={pad.left} y={height - 6} fill="var(--chart-axis)" fontSize={11}>
           {monthLabel(points[0]!.month)}
         </text>
-        <text x={width - pad.right} y={height - 6} textAnchor="end" className="fill-[var(--muted-fg)] text-[11px]">
+        <text x={width - pad.right} y={height - 6} textAnchor="end" fill="var(--chart-axis)" fontSize={11}>
           {monthLabel(points[points.length - 1]!.month)}
         </text>
       </svg>

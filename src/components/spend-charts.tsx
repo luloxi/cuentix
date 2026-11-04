@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatArs } from "@/lib/utils";
 import { formatPeriodShort } from "@/lib/period-label";
-import { colorForCategory } from "@/lib/category-colors";
+import { colorForCategory, tint } from "@/lib/category-colors";
 
 type TotalPoint = { period: string; amountArs: number };
 type CatSeries = {
@@ -13,9 +13,35 @@ type CatSeries = {
   totalArs: number;
 };
 
-const W = 720;
-const H = 260;
-const PAD = { top: 20, right: 16, bottom: 36, left: 56 };
+type Dims = { W: number; H: number; PAD: { top: number; right: number; bottom: number; left: number } };
+
+function dimsFor(width: number): Dims {
+  const W = Math.max(280, Math.round(width));
+  const narrow = W < 520;
+  return {
+    W,
+    H: narrow ? 240 : 260,
+    PAD: { top: 20, right: narrow ? 22 : 24, bottom: 34, left: narrow ? 44 : 56 },
+  };
+}
+
+/** Mide el ancho real del contenedor: el SVG se dibuja a 1:1 y el texto queda a tamaño legible (no escalado). */
+function useChartDims() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(720);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setWidth(el.clientWidth || 720);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return { ref, ...dimsFor(width) };
+}
+
+const AXIS_FONT = 11;
 
 /** Chart ceiling: 10% above the tallest data point (not a large "nice" round). */
 function chartMax(v: number): number {
@@ -23,12 +49,12 @@ function chartMax(v: number): number {
   return v * 1.1;
 }
 
-function scaleX(i: number, n: number, width: number) {
+function scaleX(i: number, n: number, width: number, PAD: Dims["PAD"]) {
   if (n <= 1) return PAD.left + width / 2;
   return PAD.left + (i / (n - 1)) * width;
 }
 
-function scaleY(v: number, max: number, height: number) {
+function scaleY(v: number, max: number, height: number, PAD: Dims["PAD"]) {
   return PAD.top + height - (v / max) * height;
 }
 
@@ -52,6 +78,7 @@ export function TotalSpendChart({
   gradientPrefix?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const { ref, W, H, PAD } = useChartDims();
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
   const fillId = `${gradientPrefix}Fill`;
@@ -64,14 +91,16 @@ export function TotalSpendChart({
 
   if (totals.length === 0) {
     return (
-      <p className="text-sm text-zinc-500">Sin datos para graficar.</p>
+      <div ref={ref}>
+        <p className="text-sm text-[var(--muted)]">Sin datos para graficar.</p>
+      </div>
     );
   }
 
   const points = totals.map((t, i) => ({
     ...t,
-    x: scaleX(i, totals.length, chartW),
-    y: scaleY(t.amountArs, max, chartH),
+    x: scaleX(i, totals.length, chartW, PAD),
+    y: scaleY(t.amountArs, max, chartH, PAD),
   }));
 
   const gridYs = [0, 0.25, 0.5, 0.75, 1].map((f) => ({
@@ -80,10 +109,10 @@ export function TotalSpendChart({
   }));
 
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="h-auto w-full"
+        className="block h-auto w-full" width={W} height={H}
         role="img"
         aria-label={ariaLabel}
       >
@@ -94,15 +123,15 @@ export function TotalSpendChart({
               x2={W - PAD.right}
               y1={g.y}
               y2={g.y}
-              stroke="currentColor"
-              className="text-zinc-200 dark:text-zinc-800"
+              stroke="var(--chart-grid)"
               strokeWidth={1}
             />
             <text
               x={PAD.left - 8}
               y={g.y + 4}
               textAnchor="end"
-              className="fill-zinc-400 text-[10px]"
+              fill="var(--chart-axis)"
+              fontSize={AXIS_FONT}
             >
               {g.label >= 1_000_000
                 ? `${(g.label / 1_000_000).toFixed(1)}M`
@@ -115,12 +144,12 @@ export function TotalSpendChart({
 
         <defs>
           <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.45" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--chart-1)" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="var(--chart-1)" stopOpacity="0" />
           </linearGradient>
           <linearGradient id={strokeId} x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#059669" />
-            <stop offset="100%" stopColor="#14b8a6" />
+            <stop offset="0%" stopColor="var(--chart-1)" />
+            <stop offset="100%" stopColor="var(--chart-1)" />
           </linearGradient>
         </defs>
         <path
@@ -142,9 +171,9 @@ export function TotalSpendChart({
               cx={p.x}
               cy={p.y}
               r={hover === i ? 5.5 : 3.5}
-              fill="#059669"
-              stroke="white"
-              strokeWidth={1.5}
+              fill="var(--chart-1)"
+              stroke="var(--surface)"
+              strokeWidth={2}
               className="cursor-pointer"
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover(null)}
@@ -161,9 +190,10 @@ export function TotalSpendChart({
             />
             <text
               x={p.x}
-              y={H - 12}
+              y={H - 10}
               textAnchor="middle"
-              className="fill-zinc-500 text-[10px]"
+              fill="var(--chart-axis)"
+              fontSize={AXIS_FONT}
             >
               {formatPeriodShort(p.period)}
             </text>
@@ -177,23 +207,26 @@ export function TotalSpendChart({
               x2={points[hover].x}
               y1={PAD.top}
               y2={PAD.top + chartH}
-              stroke="#059669"
+              stroke="var(--chart-1)"
               strokeDasharray="4 3"
-              opacity={0.4}
+              opacity={0.6}
             />
             <rect
-              x={Math.min(points[hover].x + 8, W - 150)}
+              x={Math.min(points[hover].x + 8, W - 158)}
               y={Math.max(points[hover].y - 36, 4)}
-              width={140}
+              width={150}
               height={32}
               rx={6}
-              className="fill-zinc-900 dark:fill-zinc-100"
-              opacity={0.92}
+              fill="var(--chart-tip-bg)"
+              stroke="var(--chart-tip-border)"
+              strokeWidth={1}
             />
             <text
-              x={Math.min(points[hover].x + 16, W - 142)}
+              x={Math.min(points[hover].x + 16, W - 150)}
               y={Math.max(points[hover].y - 16, 24)}
-              className="fill-white text-[11px] dark:fill-zinc-900"
+              fill="var(--chart-tip-fg)"
+              fontSize={12}
+              fontWeight={600}
             >
               {formatPeriodShort(points[hover].period)} ·{" "}
               {formatArs(points[hover].amountArs)}
@@ -229,6 +262,7 @@ export function CategoryLinesChart({
     items: Array<{ slug: string; name: string; amount: number; color: string }>;
   } | null>(null);
 
+  const { ref, W, H, PAD } = useChartDims();
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
 
@@ -243,7 +277,9 @@ export function CategoryLinesChart({
 
   if (periods.length === 0 || byCategory.length === 0) {
     return (
-      <p className="text-sm text-zinc-500">Sin categorías para graficar.</p>
+      <div ref={ref}>
+        <p className="text-sm text-[var(--muted)]">Sin categorías para graficar.</p>
+      </div>
     );
   }
 
@@ -290,7 +326,7 @@ export function CategoryLinesChart({
               className="inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] transition md:min-h-9"
               style={{
                 borderColor: on ? color : undefined,
-                backgroundColor: on ? `${color}18` : undefined,
+                backgroundColor: on ? tint(color, 14) : undefined,
                 opacity: on ? 1 : 0.45,
               }}
             >
@@ -304,10 +340,10 @@ export function CategoryLinesChart({
         })}
       </div>
 
-      <div className="relative">
+      <div className="relative" ref={ref}>
         <svg
           viewBox={`0 0 ${W} ${H}`}
-          className="h-auto w-full"
+          className="block h-auto w-full" width={W} height={H}
           role="img"
           aria-label="Gasto por categoría a lo largo de los meses"
           onMouseLeave={() => onHoverIndex(null)}
@@ -319,15 +355,15 @@ export function CategoryLinesChart({
                 x2={W - PAD.right}
                 y1={g.y}
                 y2={g.y}
-                stroke="currentColor"
-                className="text-zinc-200 dark:text-zinc-800"
+                stroke="var(--chart-grid)"
                 strokeWidth={1}
               />
               <text
                 x={PAD.left - 8}
                 y={g.y + 4}
                 textAnchor="end"
-                className="fill-zinc-400 text-[10px]"
+                fill="var(--chart-axis)"
+              fontSize={AXIS_FONT}
               >
                 {g.label >= 1_000_000
                   ? `${(g.label / 1_000_000).toFixed(1)}M`
@@ -341,8 +377,8 @@ export function CategoryLinesChart({
           {active.map((c) => {
             const color = colorForCategory(c.slug);
             const pts = c.series.map((s, i) => ({
-              x: scaleX(i, periods.length, chartW),
-              y: scaleY(s.amountArs, max, chartH),
+              x: scaleX(i, periods.length, chartW, PAD),
+              y: scaleY(s.amountArs, max, chartH, PAD),
             }));
             return (
               <path
@@ -350,7 +386,7 @@ export function CategoryLinesChart({
                 d={linePath(pts)}
                 fill="none"
                 stroke={color}
-                strokeWidth={2}
+                strokeWidth={2.5}
                 strokeLinejoin="round"
                 strokeLinecap="round"
               />
@@ -359,7 +395,7 @@ export function CategoryLinesChart({
 
           {/* vertical hover strips */}
           {periods.map((p, i) => {
-            const x = scaleX(i, periods.length, chartW);
+            const x = scaleX(i, periods.length, chartW, PAD);
             const half =
               periods.length <= 1
                 ? chartW / 2
@@ -376,9 +412,10 @@ export function CategoryLinesChart({
                 />
                 <text
                   x={x}
-                  y={H - 12}
+                  y={H - 10}
                   textAnchor="middle"
-                  className="fill-zinc-500 text-[10px]"
+                  fill="var(--chart-axis)"
+              fontSize={AXIS_FONT}
                 >
                   {formatPeriodShort(p)}
                 </text>
@@ -389,13 +426,13 @@ export function CategoryLinesChart({
           {hover && periods[hover.i] && (
             <g>
               <line
-                x1={scaleX(hover.i, periods.length, chartW)}
-                x2={scaleX(hover.i, periods.length, chartW)}
+                x1={scaleX(hover.i, periods.length, chartW, PAD)}
+                x2={scaleX(hover.i, periods.length, chartW, PAD)}
                 y1={PAD.top}
                 y2={PAD.top + chartH}
-                stroke="#71717a"
+                stroke="var(--chart-axis)"
                 strokeDasharray="4 3"
-                opacity={0.5}
+                opacity={0.7}
               />
             </g>
           )}
@@ -403,9 +440,9 @@ export function CategoryLinesChart({
 
         {hover && periods[hover.i] && (
           <div
-            className="pointer-events-none absolute z-10 min-w-[160px] rounded-lg border border-zinc-200 bg-white/95 p-2 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-900/95"
+            className="pointer-events-none absolute z-10 min-w-[200px] rounded-xl border border-[var(--chart-tip-border)] bg-[var(--chart-tip-bg)] p-2.5 text-[13px] text-[var(--chart-tip-fg)] shadow-lg"
             style={{
-              left: `min(${(scaleX(hover.i, periods.length, chartW) / W) * 100}%, calc(100% - 180px))`,
+              left: `min(${(scaleX(hover.i, periods.length, chartW, PAD) / W) * 100}%, calc(100% - 215px))`,
               top: 8,
             }}
           >
@@ -413,7 +450,7 @@ export function CategoryLinesChart({
               {formatPeriodShort(periods[hover.i]!)}
             </p>
             {hover.items.length === 0 ? (
-              <p className="text-zinc-500">Sin gasto</p>
+              <p className="text-[var(--chart-axis)]">Sin gasto</p>
             ) : (
               <ul className="space-y-0.5">
                 {hover.items.slice(0, 8).map((it) => (

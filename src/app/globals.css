@@ -43,6 +43,24 @@ html.light {
   --chart-2: #8571d6;
   --chart-3: #55ae9c;
   --chart-err: #d9505f;
+  --chart-grid: color-mix(in srgb, var(--text) 12%, transparent);
+  --chart-axis: #6b6560;
+  --chart-tip-bg: var(--surface);
+  --chart-tip-fg: var(--text);
+  --chart-tip-border: var(--border-strong);
+  --cat-1: #059669;
+  --cat-2: #2563eb;
+  --cat-3: #d97706;
+  --cat-4: #db2777;
+  --cat-5: #7c3aed;
+  --cat-6: #0891b2;
+  --cat-7: #dc2626;
+  --cat-8: #65a30d;
+  --cat-9: #ea580c;
+  --cat-10: #4f46e5;
+  --cat-11: #0d9488;
+  --cat-12: #c026d3;
+  --cat-13: #64748b;
 
   /* alias de compatibilidad */
   --background: var(--bg);
@@ -118,6 +136,24 @@ html.dark {
   --chart-2: #00e5ff;
   --chart-3: #b6ff3b;
   --chart-err: #ff4d6d;
+  --chart-grid: rgb(255 255 255 / 0.13);
+  --chart-axis: #c4c2d6;
+  --chart-tip-bg: #1b1b2b;
+  --chart-tip-fg: #f4f3fb;
+  --chart-tip-border: color-mix(in srgb, var(--accent) 55%, #1b1b2b);
+  --cat-1: #3dffa8;
+  --cat-2: #5aa9ff;
+  --cat-3: #ffb21f;
+  --cat-4: #ff4fd8;
+  --cat-5: #b794ff;
+  --cat-6: #00e5ff;
+  --cat-7: #ff5470;
+  --cat-8: #b6ff3b;
+  --cat-9: #ff8a3d;
+  --cat-10: #8f9bff;
+  --cat-11: #2dfad0;
+  --cat-12: #f26bff;
+  --cat-13: #aeb8d6;
 
   --shadow-color: 0 0 0;
   --ring: #00e5ff;

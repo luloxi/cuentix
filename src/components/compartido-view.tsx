@@ -16,7 +16,7 @@ import { HogarCharts } from "@/components/hogar-charts";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { CreateHouseholdButton } from "@/components/create-household";
 import { CategoryIcon } from "@/lib/category-icons";
-import { colorForCategory } from "@/lib/category-colors";
+import { colorForCategory, tint } from "@/lib/category-colors";
 import {
   getServerSkipped,
   getSkippedSnapshot,
@@ -464,7 +464,7 @@ export function CompartidoView() {
                         >
                           <span
                             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                            style={{ backgroundColor: `${color}18`, color }}
+                            style={{ backgroundColor: tint(color, 14), color }}
                           >
                             <CategoryIcon slug={svc.slug} size={16} />
                           </span>
@@ -563,7 +563,7 @@ export function CompartidoView() {
                           />
                           <span
                             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                            style={{ backgroundColor: `${color}18`, color }}
+                            style={{ backgroundColor: tint(color, 14), color }}
                           >
                             <CategoryIcon slug={c.slug} size={16} />
                           </span>

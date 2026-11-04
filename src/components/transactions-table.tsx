@@ -7,7 +7,7 @@ import {
 import * as XLSX from "xlsx";
 import { formatArs, formatPesos, formatUsd, cn, currentPeriodAr, periodFromDateString } from "@/lib/utils";
 import { CategoryIcon } from "@/lib/category-icons";
-import { colorForCategory } from "@/lib/category-colors";
+import { colorForCategory, tint } from "@/lib/category-colors";
 import { formatPeriodLabel, formatPeriodTitle } from "@/lib/period-label";
 import { isAbortError } from "@/hooks/use-json-resource";
 import { nextPage } from "@/lib/list-page";
@@ -1295,7 +1295,7 @@ export function TransactionsTable() {
                   >
                     <span
                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl"
-                      style={{ backgroundColor: `${color}26`, color }}
+                      style={{ backgroundColor: tint(color, 15), color }}
                     >
                       <CategoryIcon slug={slug} size={18} />
                     </span>

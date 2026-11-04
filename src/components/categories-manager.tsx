@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CategoryIcon } from "@/lib/category-icons";
-import { colorForCategory } from "@/lib/category-colors";
+import { colorForCategory, tint } from "@/lib/category-colors";
 import { EmptyState, LoadingBlock, Surface, Toast } from "@/components/ui";
 
 type CatRow = {
@@ -255,7 +255,7 @@ export function CategoriesManager() {
                 >
                   <span
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
-                    style={{ backgroundColor: `${color}18`, color }}
+                    style={{ backgroundColor: tint(color, 14), color }}
                   >
                     <CategoryIcon slug={cat.slug} size={16} />
                   </span>
