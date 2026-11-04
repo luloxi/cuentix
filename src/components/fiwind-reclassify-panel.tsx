@@ -313,15 +313,19 @@ function ReclassifySheet({
   useEffect(() => {
     if (movement.isBusiness) return;
     const ac = new AbortController();
+    const requestedCategory = categoryId;
     void (async () => {
       try {
-        const res = await fetch(`/api/fiwind/similar?id=${encodeURIComponent(movement.id)}`, {
+        const params = new URLSearchParams({ id: movement.id });
+        if (requestedCategory) params.set("categoryId", requestedCategory);
+        const res = await fetch(`/api/fiwind/similar?${params}`, {
           credentials: "include",
           signal: ac.signal,
         });
         const data = (await res.json().catch(() => null)) as (Partial<Similar> & { error?: string }) | null;
         if (ac.signal.aborted) return;
         if (!res.ok) throw new Error(data?.error || "No se pudieron contar los similares");
+        setSimilarError(null);
         setSimilar({
           key: data?.key ?? "",
           variants: data?.variants ?? [],
@@ -337,7 +341,7 @@ function ReclassifySheet({
       }
     })();
     return () => ac.abort();
-  }, [movement.id, movement.isBusiness]);
+  }, [movement.id, movement.isBusiness, categoryId]);
 
   const showToggle = !movement.isBusiness && similar != null && similar.count > 0;
   const sameCategory = categoryId !== "" && categoryId === currentId;
@@ -352,18 +356,25 @@ function ReclassifySheet({
     if (confirmDisabled) return;
     setSaving(true);
     setSheetError(null);
-    const applying = applySimilar && showToggle;
+    const payload =
+      applySimilar && showToggle && similar
+        ? {
+            id: movement.id,
+            categoryId,
+            applyToSimilar: true,
+            expectedCount: similar.count,
+          }
+        : {
+            id: movement.id,
+            categoryId,
+            applyToSimilar: false,
+          };
     try {
       const res = await fetch("/api/fiwind/reclassify", {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          id: movement.id,
-          categoryId,
-          applyToSimilar: applying,
-          ...(applying ? { expectedCount: similar?.count ?? 0 } : {}),
-        }),
+        body: JSON.stringify(payload),
       });
       const data = (await res.json().catch(() => null)) as {
         error?: string;
@@ -458,7 +469,13 @@ function ReclassifySheet({
                   ref={selectRef}
                   value={categoryId}
                   disabled={saving}
-                  onChange={(event) => setCategoryId(event.target.value)}
+                  onChange={(event) => {
+                    setCategoryId(event.target.value);
+                    if (!movement.isBusiness) {
+                      setSimilarLoading(true);
+                      setSimilarError(null);
+                    }
+                  }}
                   className="lc-input min-h-11 w-full cursor-pointer disabled:cursor-not-allowed"
                 >
                   <option value="">Elegí una categoría</option>
@@ -477,12 +494,12 @@ function ReclassifySheet({
                     Buscando similares…
                   </p>
                 )}
-                {similarError && (
+                {!similarLoading && similarError && (
                   <p className="text-sm text-[var(--muted-fg)]" role="status">
                     No pude contar similares. Se va a cambiar solo este movimiento.
                   </p>
                 )}
-                {showToggle && similar && (
+                {!similarLoading && showToggle && similar && (
                   <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-3">
                     <input
                       type="checkbox"
@@ -496,7 +513,7 @@ function ReclassifySheet({
                     </span>
                   </label>
                 )}
-                {similar != null && similar.skippedBusiness > 0 && (
+                {!similarLoading && similar != null && similar.skippedBusiness > 0 && (
                   <p className="mt-2 text-xs text-[var(--muted-fg)]">
                     {similar.skippedBusiness > 500
                       ? "Hay más de 500 movimientos de negocio que no se tocan. Cambialos desde el gasto."

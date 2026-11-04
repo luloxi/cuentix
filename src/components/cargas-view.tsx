@@ -10,7 +10,6 @@ import {
   Upload,
 } from "lucide-react";
 import { ImportForm } from "@/components/import-form";
-import { FiwindReclassifyAction } from "@/components/fiwind-reclassify-action";
 import { EmptyState, PageHeader, PageStack, Surface } from "@/components/ui";
 import { formatDateAr, cn } from "@/lib/utils";
 
@@ -137,9 +136,6 @@ export function CargasView() {
         <span className="font-medium text-[var(--foreground)]">BBVA:</span>{" "}
         Tarjetas → Últimos movimientos (Excel).
       </p>
-
-      <FiwindReclassifyAction compact />
-
 
       <div className="flex flex-wrap gap-1.5">
         {filters.map((f) => (
