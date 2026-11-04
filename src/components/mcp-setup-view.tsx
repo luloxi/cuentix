@@ -244,8 +244,7 @@ headers = { Authorization = "Bearer ${snippetToken}" }`;
         </p>
         <p className="text-sm leading-relaxed text-amber-900/90 dark:text-amber-100/90">
           <strong>Nunca pegues el token en un chat</strong>, ni en issues, ni
-          en el repo. Si se filtró, rotálo acá: el anterior deja de andar. Polar
-          (suscripción) sigue aparte y pausado: esto no lo toca.
+          en el repo. Si se filtró, rotálo acá: el anterior deja de andar.
         </p>
       </Surface>
 

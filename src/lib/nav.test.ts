@@ -4,7 +4,10 @@ import {
   NAV_HREFS,
   NAV_LINKS,
   homeNextAction,
+  isUnlistedNavHref,
   navIncludesDeuda,
+  navLinksFor,
+  splitMobileNav,
 } from "./nav";
 import { DEUDA_ENABLED, isDeudaEnabled } from "./features";
 import {
@@ -14,24 +17,101 @@ import {
   stepToHref,
 } from "./swipe-path";
 
-describe("slim nav", () => {
-  it("is Inicio · Consumos · Ingresos · Hogar", () => {
+describe("section nav", () => {
+  const labels = [
+    "Inicio",
+    "Consumos",
+    "Ingresos",
+    "Hogar",
+    "Análisis",
+    "Mes a mes",
+    "Grupo",
+    "Supermercado",
+    "MCP",
+  ];
+  const hrefs = [
+    "/dashboard",
+    "/consumos",
+    "/ingresos",
+    "/compartido",
+    "/analisis",
+    "/mes-a-mes",
+    "/grupo",
+    "/supermercado",
+    "/mcp",
+  ];
+
+  it("lists every working read-only section", () => {
     assert.deepEqual(
       NAV_LINKS.map((l) => l.label),
+      labels,
+    );
+    assert.deepEqual([...NAV_HREFS], hrefs);
+    assert.equal(NAV_LINKS.length, 9);
+  });
+
+  it("adds Administración only for admins", () => {
+    const guest = navLinksFor(false);
+    assert.equal(
+      guest.some((l) => l.href === "/admin" || l.label === "Administración"),
+      false,
+    );
+    const admin = navLinksFor(true);
+    assert.equal(admin.at(-1)?.href, "/admin");
+    assert.equal(admin.at(-1)?.label, "Administración");
+    assert.deepEqual(
+      admin.slice(0, -1).map((l) => l.label),
+      labels,
+    );
+  });
+
+  it("keeps Compartir, Suscripción, Importar, Cargas and add-expense unlisted", () => {
+    for (const links of [navLinksFor(false), navLinksFor(true)]) {
+      const listedHrefs = links.map((l) => l.href);
+      const listedLabels = links.map((l) => l.label);
+      for (const href of [
+        "/share-target",
+        "/suscripcion",
+        "/importar",
+        "/cargas",
+        "/deuda",
+      ]) {
+        assert.equal(
+          listedHrefs.some((h) => h === href),
+          false,
+        );
+        assert.equal(isUnlistedNavHref(href), true);
+      }
+      for (const label of [
+        "Compartir",
+        "Suscripción",
+        "Importar",
+        "Cargas",
+        "Sumar",
+        "Deuda",
+      ]) {
+        assert.equal(listedLabels.includes(label), false);
+      }
+    }
+  });
+
+  it("puts the overflow in Más on mobile", () => {
+    const everyone = splitMobileNav(navLinksFor(false));
+    assert.deepEqual(
+      everyone.bar.map((l) => l.label),
       ["Inicio", "Consumos", "Ingresos", "Hogar"],
     );
-    assert.deepEqual([...NAV_HREFS], [
-      "/dashboard",
-      "/consumos",
-      "/ingresos",
-      "/compartido",
-    ]);
-    assert.equal(NAV_LINKS.length, 4);
-    assert.equal(
-      (NAV_LINKS as readonly { href: string; label: string }[]).some(
-        (l) => l.href === "/cargas" || l.label === "Cargas",
-      ),
-      false,
+    assert.deepEqual(
+      everyone.more.map((l) => l.label),
+      ["Análisis", "Mes a mes", "Grupo", "Supermercado", "MCP"],
+    );
+    const admin = splitMobileNav(navLinksFor(true));
+    assert.equal(admin.bar.length, 4);
+    assert.equal(admin.more.at(-1)?.label, "Administración");
+    assert.ok(admin.more.length > 1);
+    assert.deepEqual(
+      [...admin.bar, ...admin.more].map((l) => l.href),
+      navLinksFor(true).map((l) => l.href),
     );
   });
 
