@@ -31,11 +31,21 @@ export function formatPesos(value: number | null | undefined): string {
  */
 export function formatUsd(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
+  return formatCurrencyAmount("USD", value);
+}
+
+/** ARS, USDT, and USD stay labeled. They are never shown as one sum. */
+export function formatCurrencyAmount(
+  currency: "ARS" | "USDT" | "USD",
+  value: number | null | undefined,
+): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  if (currency === "ARS") return formatArs(value);
   const n = new Intl.NumberFormat("es-AR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
-  return `USD ${n}`;
+  return `${currency} ${n}`;
 }
 
 /**

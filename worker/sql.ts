@@ -195,6 +195,33 @@ export const INTERNAL_VISIBLE_SQL = `(
   )
 )`;
 
+/**
+ * Rows that are not household spend: own-account transfers, FX, and wallet
+ * conversions. Yields and deposits stay out (they are not transfers).
+ * The bound `json_each` argument is the internal-transfer id list.
+ * Requires the categories join (`c`).
+ */
+export const INTERNAL_ASIDE_SQL = `(
+  IFNULL(c.slug, '') = 'transferencia-interna'
+  OR ${INTERNAL_VISIBLE_SQL}
+  OR upper(trim(t.description_normalized)) GLOB 'CONVERSION*'
+  OR upper(trim(t.description_normalized)) IN (
+    'TRANSFERENCIA ARS',
+    'TRANSFERENCIA USD',
+    'TRANSFERENCIA USDC',
+    'TRANSFERENCIA USDT',
+    'COMPRA USD',
+    'COMPRA USDC',
+    'COMPRA USDT',
+    'COMPRA USDB',
+    'VENTA USD',
+    'VENTA USDC',
+    'VENTA USDT',
+    'VENTA USDB'
+  )
+  OR t.id IN (SELECT value FROM json_each(?))
+)`;
+
 export function expenseSql(dupIds?: Iterable<string>): string {
   return `
   t.is_payment = 0

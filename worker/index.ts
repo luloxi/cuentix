@@ -11,7 +11,9 @@ import { handleBillingSubscription } from "./billing";
 import { handleCargas } from "./cargas";
 import { handleCategories } from "./categories";
 import { handleCompartidoStats } from "./compartido";
+import { handleBalancesGet, handleBalancesManual, handleBalancesRoutine } from "./balances";
 import { handleDashboard } from "./dashboard";
+import { handleIncomeByMonth, handleSpendingByCategory, handleSpendingSeries } from "./insights";
 import { handleGrupo } from "./grupo";
 import { handleMesAMes } from "./mes-a-mes";
 import { handleReceipts } from "./receipts";
@@ -52,6 +54,9 @@ const worker = {
       if (path === "/api/svc" || path.startsWith("/api/svc/")) {
         return await handleSvc(req, env);
       }
+      if (path === "/api/balances" && req.method === "POST") {
+        return await handleBalancesRoutine(req, env);
+      }
       if (!path.startsWith("/api/")) {
         if (path.startsWith("/.well-known/")) return json({ error: "No encontrado" }, 404);
         return env.ASSETS.fetch(req);
@@ -79,6 +84,11 @@ const worker = {
         return await handlePatrimonio(req, env, user);
       }
       if (path === "/api/incomes") return await handleIncomes(req, env, user);
+      if (path === "/api/income-by-month") return await handleIncomeByMonth(req, env, user);
+      if (path === "/api/spending-by-category") return await handleSpendingByCategory(req, env, user);
+      if (path === "/api/spending-series") return await handleSpendingSeries(req, env, user);
+      if (path === "/api/balances/manual") return await handleBalancesManual(req, env, user);
+      if (path === "/api/balances") return await handleBalancesGet(req, env, user);
       if (path === "/api/cargas" && req.method === "GET") {
         return await handleCargas(req, env, user);
       }

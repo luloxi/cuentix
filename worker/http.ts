@@ -3,9 +3,23 @@ export const OAUTH_COOKIE = "tarask_oauth";
 export const HOUSEHOLD_COOKIE = "lc_household";
 
 export function json(data: unknown, status = 200, cookies?: string[]): Response {
+  return jsonWithCache(data, status, "no-store", cookies);
+}
+
+/** Successful reads of the v2-style aggregates. Private so a shared cache cannot mix users. */
+export function jsonPrivate(data: unknown, status = 200): Response {
+  return jsonWithCache(data, status, "private, max-age=30");
+}
+
+function jsonWithCache(
+  data: unknown,
+  status: number,
+  cacheControl: string,
+  cookies?: string[],
+): Response {
   const headers = new Headers();
   headers.set("content-type", "application/json; charset=utf-8");
-  headers.set("cache-control", "no-store");
+  headers.set("cache-control", cacheControl);
   for (const cookie of cookies ?? []) headers.append("set-cookie", cookie);
   return new Response(JSON.stringify(data), { status, headers });
 }

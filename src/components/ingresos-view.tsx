@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useJsonResource } from "@/hooks/use-json-resource";
 import { readScoped, scoped, type Scoped } from "@/lib/scoped-state";
-import { LineChart, Trash2 } from "lucide-react";
-import { TotalSpendChart } from "@/components/spend-charts";
+import { Trash2 } from "lucide-react";
+import { IncomeByMonthChart } from "@/components/income-by-month-chart";
 import { SectionNav } from "@/components/section-nav";
 import {
   EmptyState,
@@ -65,7 +65,6 @@ export function IngresosView() {
   const resource = useJsonResource<{
     incomes?: IncomeRow[];
     periodEntries?: PeriodIncomeEntry[];
-    monthlyEvolution?: Array<{ period: string; amountArs: number }>;
   }>(`/api/incomes?period=${encodeURIComponent(period)}`, [period], {
     fallbackError: "Error",
     networkError: "Error de red",
@@ -74,10 +73,6 @@ export function IngresosView() {
   const periodEntries = useMemo(
     () => resource.data?.periodEntries ?? [],
     [resource.data?.periodEntries],
-  );
-  const monthlyEvolution = useMemo(
-    () => resource.data?.monthlyEvolution ?? [],
-    [resource.data?.monthlyEvolution],
   );
   const loading = resource.loading;
   const [saving, setSaving] = useState(false);
@@ -91,6 +86,7 @@ export function IngresosView() {
   const setOk = (message: string | null) =>
     setOkState(message == null ? null : scoped(period, message));
   const [mode, setMode] = useState<FormMode>("recurring");
+  const [incomeTick, setIncomeTick] = useState(0);
 
   const [date, setDate] = useState(todayDateAr);
   const [label, setLabel] = useState("");
@@ -156,6 +152,7 @@ export function IngresosView() {
           : "Ingreso variable guardado",
       );
       await resource.reload();
+      setIncomeTick((tick) => tick + 1);
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Error");
     } finally {
@@ -173,6 +170,7 @@ export function IngresosView() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error");
       await resource.reload();
+      setIncomeTick((tick) => tick + 1);
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Error");
     }
@@ -184,7 +182,7 @@ export function IngresosView() {
     <PageStack className="!space-y-4">
       <PageHeader
         title="Ingresos"
-        description={`Sueldos y cobros · ${formatPeriodLabel(period)}. La neta del inicio es esto menos los gastos.`}
+        description={`Sueldos y cobros · ${formatPeriodLabel(period)}. Las transferencias internas no son ingreso. La neta del inicio es esto menos los gastos.`}
         actions={
           <select
             value={period}
@@ -210,24 +208,7 @@ export function IngresosView() {
       )}
       {ok && <Toast>{ok}</Toast>}
 
-      {!loading && monthlyEvolution.some((p) => p.amountArs > 0) && (
-        <Surface className="space-y-2 !p-4">
-          <div className="flex items-center gap-2">
-            <LineChart className="h-4 w-4 text-[var(--brand-fg)]" aria-hidden />
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-fg)]">
-              Evolución de ingresos
-            </h2>
-          </div>
-          <p className="text-xs text-[var(--muted-fg)]">
-            Total en pesos por mes (sueldos recurrentes + variables).
-          </p>
-          <TotalSpendChart
-            totals={monthlyEvolution}
-            ariaLabel="Evolución de ingresos por mes"
-            gradientPrefix="ingresos"
-          />
-        </Surface>
-      )}
+      <IncomeByMonthChart refreshKey={incomeTick} />
 
       <SegmentedControl
         value={mode}
