@@ -65,6 +65,16 @@ export interface Env {
   /** Polar billing. Optional. Never log. */
   POLAR_ACCESS_TOKEN?: string;
   POLAR_PRODUCT_ID?: string;
+  /**
+   * Bearer for `POST /api/balances` (operator routine). wrangler secret.
+   * Never put the value in wrangler.jsonc, git, or logs.
+   */
+  BALANCES_TOKEN?: string;
+  /**
+   * `users.email` the routine writes for. When unset, the admin email is used.
+   * Not a secret.
+   */
+  BALANCES_USER_EMAIL?: string;
 }
 
 /** Subset of the Workers execution context. Tests pass a fake. */

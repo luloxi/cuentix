@@ -23,7 +23,7 @@ export const MAIN_TABS = [
   {
     href: "/patrimonio",
     label: "Patrimonio",
-    match: ["/patrimonio", "/ahorros", "/deuda"],
+    match: ["/patrimonio", "/ahorros", "/saldos", "/deuda"],
   },
   {
     href: "/compartido",
@@ -96,6 +96,7 @@ export const SECTION_TABS: Record<SectionId, readonly SectionTab[]> = {
   patrimonio: [
     { id: "evolucion", label: "Evolución", href: "/patrimonio", path: "/patrimonio" },
     { id: "ahorros", label: "Ahorros", href: "/ahorros", path: "/ahorros" },
+    { id: "saldos", label: "Saldos", href: "/saldos", path: "/saldos" },
     { id: "deuda", label: "Deuda", href: "/deuda", path: "/deuda" },
   ],
   hogar: [

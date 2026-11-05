@@ -11,6 +11,7 @@ import {
 import { cn, formatArs, formatUsd, currentPeriodAr } from "@/lib/utils";
 import { formatPeriodLabel } from "@/lib/period-label";
 import { colorForCategory } from "@/lib/category-colors";
+import { GastoInsights } from "@/components/gasto-insights";
 import { CategoryLinesChart, TotalSpendChart } from "@/components/spend-charts";
 import { MesAMesTxRow, type MesAMesTx } from "@/components/mes-a-mes-tx-row";
 import {
@@ -967,6 +968,7 @@ export function MesAMesView({
     return (
       <div className="space-y-4">
         <OwnershipFilterBar ownershipF={ownershipF} setOwnershipF={setOwnershipF} />
+        <GastoInsights ownership={ownershipF} />
         {periods.length === 0 ? emptyHint : <ChartsPanel chart={chart} />}
       </div>
     );

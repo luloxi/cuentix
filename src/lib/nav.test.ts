@@ -48,6 +48,7 @@ describe("nav del rediseño", () => {
       "/analisis": "/consumos",
       "/patrimonio": "/patrimonio",
       "/ahorros": "/patrimonio",
+      "/saldos": "/patrimonio",
       "/deuda": "/patrimonio",
       "/deuda/detalle": "/patrimonio",
       "/compartido": "/compartido",
@@ -77,7 +78,7 @@ describe("nav del rediseño", () => {
   it("los chips de Patrimonio y Hogar apuntan a las rutas de siempre", () => {
     assert.deepEqual(
       SECTION_TABS.patrimonio.map((t) => t.href),
-      ["/patrimonio", "/ahorros", "/deuda"],
+      ["/patrimonio", "/ahorros", "/saldos", "/deuda"],
     );
     assert.deepEqual(
       SECTION_TABS.hogar.map((t) => t.href),

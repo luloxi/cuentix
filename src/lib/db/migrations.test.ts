@@ -19,6 +19,7 @@ function openMigrated(): DatabaseSync {
     "0006_patrimonio_user_date.sql",
     "0007_perf_indexes.sql",
     "0008_tx_household_desc_idx.sql",
+    "0009_balance_snapshots.sql",
   ]) {
     db.exec(readFileSync(join(root, "migrations", file), "utf8"));
   }
@@ -218,5 +219,39 @@ describe("D1 migrations on node:sqlite", () => {
     assert.match(row.sql, /description_normalized/);
     const schema = readFileSync(join(root, "src/lib/db/schema.ts"), "utf8");
     assert.match(schema, /tx_household_desc_idx/);
+  });
+
+  it("adds balance snapshots without touching existing money columns", () => {
+    const src = readFileSync(join(root, "migrations", "0009_balance_snapshots.sql"), "utf8");
+    assert.match(src, /CREATE TABLE IF NOT EXISTS balance_snapshots/);
+    assert.doesNotMatch(src, /\b(DROP TABLE|DELETE FROM|INSERT INTO|ALTER TABLE)\b/i);
+    assert.doesNotMatch(src, /\bUPDATE\b/i);
+    const db = openMigrated();
+    db.prepare("INSERT INTO users (id, email) VALUES ('u1', 'a@b.co')").run();
+    db.prepare("INSERT INTO households (id, invite_code) VALUES ('h1', 'CODE1234')").run();
+    db.prepare(
+      `INSERT INTO balance_snapshots (
+         id, user_id, household_id, account_name, date, currency, amount, source
+       ) VALUES ('b1', 'u1', 'h1', 'Fiwind', '2026-11-03', 'USDT', '1961.41', 'routine')`,
+    ).run();
+    const row = db
+      .prepare("SELECT amount, typeof(amount) AS t FROM balance_snapshots WHERE id = 'b1'")
+      .get() as { amount: string; t: string };
+    assert.equal(row.t, "text");
+    assert.equal(row.amount, "1961.41");
+    db.prepare(
+      `INSERT INTO balance_snapshots (
+         id, user_id, household_id, account_name, date, currency, amount, source
+       ) VALUES ('b2', 'u1', 'h1', 'Fiwind', '2026-11-03', 'ARS', '10', 'manual')`,
+    ).run();
+    assert.throws(() =>
+      db
+        .prepare(
+          `INSERT INTO balance_snapshots (
+             id, user_id, household_id, account_name, date, currency, amount, source
+           ) VALUES ('b3', 'u1', 'h1', 'Fiwind', '2026-11-03', 'USDT', '1', 'manual')`,
+        )
+        .run(),
+    );
   });
 });

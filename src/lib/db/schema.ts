@@ -385,6 +385,39 @@ export const patrimonioSnapshots = sqliteTable(
   ],
 );
 
+/**
+ * Point-in-time bank balances. One row per account, currency, and date.
+ * ARS, USDT, and USD are separate rows. `amount` is a decimal string.
+ */
+export const balanceSnapshots = sqliteTable(
+  "balance_snapshots",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    accountName: text("account_name").notNull(),
+    date: text("date").notNull(),
+    currency: text("currency").$type<"ARS" | "USDT" | "USD">().notNull(),
+    amount: money("amount").notNull(),
+    source: text("source").$type<"manual" | "routine">().notNull(),
+    createdAt: tsNow("created_at"),
+  },
+  (t) => [
+    uniqueIndex("balance_snapshots_slot_uidx").on(
+      t.userId,
+      t.householdId,
+      t.accountName,
+      t.currency,
+      t.date,
+    ),
+    index("balance_snapshots_lookup_idx").on(t.userId, t.householdId, t.currency, t.date),
+  ],
+);
+
 export const incomes = sqliteTable(
   "incomes",
   {
